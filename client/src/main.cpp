@@ -32,7 +32,6 @@ int main(int argc, char* argv[]) {
     float previewScale = 1.0f;  // Changed from 0.75f to 1.0f for pixel-perfect display
     std::string logFile = "performance_double_buffered.csv";
     bool enableLogging = false;
-    std::string bufferingMode = "double"; // Default to double buffering
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -53,12 +52,6 @@ int main(int argc, char* argv[]) {
             enableLogging = true;
         } else if (arg == "--enable-logging") {
             enableLogging = true;
-        } else if (arg == "--buffering-mode" && i + 1 < argc) {
-            bufferingMode = argv[++i];
-            if (bufferingMode != "single" && bufferingMode != "double" && bufferingMode != "triple") {
-                std::cerr << "Invalid buffering mode: " << bufferingMode << ". Using default (double)." << std::endl;
-                bufferingMode = "double";
-            }
         } else if (arg == "--help") {
             std::cout << "Desktop Sharing Client" << std::endl;
             std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -69,7 +62,6 @@ int main(int argc, char* argv[]) {
             std::cout << "  --bitrate <bitrate>       Target bitrate in bps (default: 2000000)" << std::endl;
             std::cout << "  --no-preview              Disable preview window" << std::endl;
             std::cout << "  --preview-scale <scale>   Scale preview window (default: 1.0)" << std::endl;
-            std::cout << "  --buffering-mode <mode>   Buffering mode: single, double, or triple (default: double)" << std::endl;
             std::cout << "  --enable-logging          Enable performance logging" << std::endl;
             std::cout << "  --log-file <filename>     Log file name (default: performance_double_buffered.csv)" << std::endl;
             std::cout << "  --help                    Show this help message" << std::endl;
@@ -79,7 +71,7 @@ int main(int argc, char* argv[]) {
     
     std::cout << "Starting desktop sharing client" << std::endl;
     std::cout << "Press Ctrl+C to exit" << std::endl;
-    std::cout << "Using " << bufferingMode << " buffering mode" << std::endl;
+    std::cout << "Using double buffering mode" << std::endl;
     
     // Initialize performance logger if enabled
     if (enableLogging) {
@@ -100,15 +92,6 @@ int main(int argc, char* argv[]) {
     if (!screenCapture.Initialize(monitorIndex)) {
         std::cerr << "Failed to initialize screen capture" << std::endl;
         return 1;
-    }
-    
-    // Configure buffering mode
-    if (bufferingMode == "single") {
-        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Single);
-    } else if (bufferingMode == "double") {
-        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Double);
-    } else if (bufferingMode == "triple") {
-        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Triple);
     }
     
     // Get initial frame to determine dimensions

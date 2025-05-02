@@ -1,1 +1,1 @@
- -ldxgi -ld3d11 -ld3dcompiler -lpsapi C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/third_party/x264/build/lib/libx264.a -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 
+ -ldxgi -ld3d11 -ld3dcompiler -lpsapi -lmfplat C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/third_party/x264/build/lib/libx264.a -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 

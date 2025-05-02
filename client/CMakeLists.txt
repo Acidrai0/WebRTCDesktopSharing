@@ -50,6 +50,7 @@ target_link_libraries(desktop_sharing_client PRIVATE
     d3d11
     d3dcompiler
     psapi
+    mfplat  # Media Foundation for optimized memory operations
     ${X264_LIBRARY_PATH}
 )
 

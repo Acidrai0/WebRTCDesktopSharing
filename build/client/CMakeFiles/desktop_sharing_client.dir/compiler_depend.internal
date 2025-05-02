@@ -498,6 +498,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj
  C:/msys64/mingw64/include/_timeval.h
  C:/msys64/mingw64/include/apiset.h
  C:/msys64/mingw64/include/apisetcconv.h
+ C:/msys64/mingw64/include/avrt.h
  C:/msys64/mingw64/include/basetsd.h
  C:/msys64/mingw64/include/bcrypt.h
  C:/msys64/mingw64/include/bemapiset.h
@@ -727,12 +728,16 @@ client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj
  C:/msys64/mingw64/include/malloc.h
  C:/msys64/mingw64/include/mciapi.h
  C:/msys64/mingw64/include/mcx.h
+ C:/msys64/mingw64/include/mediaobj.h
  C:/msys64/mingw64/include/memoryapi.h
+ C:/msys64/mingw64/include/mfapi.h
+ C:/msys64/mingw64/include/mfobjects.h
  C:/msys64/mingw64/include/minwinbase.h
  C:/msys64/mingw64/include/minwindef.h
  C:/msys64/mingw64/include/mmeapi.h
  C:/msys64/mingw64/include/mmiscapi.h
  C:/msys64/mingw64/include/mmiscapi2.h
+ C:/msys64/mingw64/include/mmreg.h
  C:/msys64/mingw64/include/mmsyscom.h
  C:/msys64/mingw64/include/mmsystem.h
  C:/msys64/mingw64/include/msxml.h
@@ -756,6 +761,8 @@ client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj
  C:/msys64/mingw64/include/processtopologyapi.h
  C:/msys64/mingw64/include/profileapi.h
  C:/msys64/mingw64/include/propidl.h
+ C:/msys64/mingw64/include/propkeydef.h
+ C:/msys64/mingw64/include/propsys.h
  C:/msys64/mingw64/include/prsht.h
  C:/msys64/mingw64/include/psapi.h
  C:/msys64/mingw64/include/psdk_inc/_fd_types.h
@@ -800,6 +807,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj
  C:/msys64/mingw64/include/securitybaseapi.h
  C:/msys64/mingw64/include/servprov.h
  C:/msys64/mingw64/include/shellapi.h
+ C:/msys64/mingw64/include/shtypes.h
  C:/msys64/mingw64/include/signal.h
  C:/msys64/mingw64/include/specstrings.h
  C:/msys64/mingw64/include/stdarg.h
@@ -810,6 +818,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj
  C:/msys64/mingw64/include/stralign.h
  C:/msys64/mingw64/include/string.h
  C:/msys64/mingw64/include/stringapiset.h
+ C:/msys64/mingw64/include/structuredquerycondition.h
  C:/msys64/mingw64/include/swprintf.inl
  C:/msys64/mingw64/include/synchapi.h
  C:/msys64/mingw64/include/sys/timeb.h
@@ -1880,6 +1889,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj
  C:/msys64/mingw64/include/_timeval.h
  C:/msys64/mingw64/include/apiset.h
  C:/msys64/mingw64/include/apisetcconv.h
+ C:/msys64/mingw64/include/avrt.h
  C:/msys64/mingw64/include/basetsd.h
  C:/msys64/mingw64/include/bcrypt.h
  C:/msys64/mingw64/include/bemapiset.h
@@ -2068,12 +2078,16 @@ client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj
  C:/msys64/mingw64/include/malloc.h
  C:/msys64/mingw64/include/mciapi.h
  C:/msys64/mingw64/include/mcx.h
+ C:/msys64/mingw64/include/mediaobj.h
  C:/msys64/mingw64/include/memoryapi.h
+ C:/msys64/mingw64/include/mfapi.h
+ C:/msys64/mingw64/include/mfobjects.h
  C:/msys64/mingw64/include/minwinbase.h
  C:/msys64/mingw64/include/minwindef.h
  C:/msys64/mingw64/include/mmeapi.h
  C:/msys64/mingw64/include/mmiscapi.h
  C:/msys64/mingw64/include/mmiscapi2.h
+ C:/msys64/mingw64/include/mmreg.h
  C:/msys64/mingw64/include/mmsyscom.h
  C:/msys64/mingw64/include/mmsystem.h
  C:/msys64/mingw64/include/msxml.h
@@ -2097,6 +2111,8 @@ client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj
  C:/msys64/mingw64/include/processtopologyapi.h
  C:/msys64/mingw64/include/profileapi.h
  C:/msys64/mingw64/include/propidl.h
+ C:/msys64/mingw64/include/propkeydef.h
+ C:/msys64/mingw64/include/propsys.h
  C:/msys64/mingw64/include/prsht.h
  C:/msys64/mingw64/include/psdk_inc/_fd_types.h
  C:/msys64/mingw64/include/psdk_inc/_ip_mreq1.h
@@ -2140,6 +2156,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj
  C:/msys64/mingw64/include/securitybaseapi.h
  C:/msys64/mingw64/include/servprov.h
  C:/msys64/mingw64/include/shellapi.h
+ C:/msys64/mingw64/include/shtypes.h
  C:/msys64/mingw64/include/signal.h
  C:/msys64/mingw64/include/specstrings.h
  C:/msys64/mingw64/include/stdarg.h
@@ -2150,6 +2167,7 @@ client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj
  C:/msys64/mingw64/include/stralign.h
  C:/msys64/mingw64/include/string.h
  C:/msys64/mingw64/include/stringapiset.h
+ C:/msys64/mingw64/include/structuredquerycondition.h
  C:/msys64/mingw64/include/swprintf.inl
  C:/msys64/mingw64/include/synchapi.h
  C:/msys64/mingw64/include/sys/timeb.h

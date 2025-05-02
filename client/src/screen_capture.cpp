@@ -11,11 +11,10 @@ ScreenCapture::ScreenCapture() {
     m_acquiredDesktopImage = nullptr;
     m_stagingTextures[0] = nullptr;
     m_stagingTextures[1] = nullptr;
-    m_stagingTextures[2] = nullptr;
     m_currentTextureIndex = 0;
     m_frameCount = 0;
     m_framerate = 0.0f;
-    m_bufferingMode = BufferingMode::Double; // Default to double buffering
+    m_bufferingMode = BufferingMode::Double; // Using double buffering
     m_alignedBufferPadding = MEMORY_ALIGNMENT; // Set default padding for alignment
     
     // Initialize cursor position
@@ -409,19 +408,9 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     size_t requiredSize = width * height * 4; // BGRA format (4 bytes per pixel)
     uint8_t* alignedDst = AlignBuffer(outputBuffer, requiredSize);
     
-    // Copy the data
+    // Copy the data using optimized method
     uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
-    
-    if (mappedResource.RowPitch == width * 4) {
-        // Rows are packed with no padding, can copy the entire buffer at once
-        memcpy(alignedDst, src, requiredSize);
-    } else {
-        // Rows have padding, need to copy each row separately
-        // Use aligned destination pointer for better cache performance
-        for (int y = 0; y < height; y++) {
-            memcpy(alignedDst + y * width * 4, src + y * mappedResource.RowPitch, width * 4);
-        }
-    }
+    OptimizedCopyFrame(alignedDst, src, width, height, mappedResource.RowPitch);
     
     // Unmap the texture
     m_d3dContext->Unmap(m_stagingTextures[m_currentTextureIndex], 0);
@@ -490,23 +479,8 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         // Return true anyway since we've already got the frame data
     }
     
-    // Switch to the next texture based on the buffering mode
-    switch (m_bufferingMode) {
-        case BufferingMode::Single:
-            // In single buffering mode, we always use the same texture (index 0)
-            m_currentTextureIndex = 0;
-            break;
-            
-        case BufferingMode::Double:
-            // In double buffering mode, we alternate between textures 0 and 1
-            m_currentTextureIndex = (m_currentTextureIndex + 1) % 2;
-            break;
-            
-        case BufferingMode::Triple:
-            // In triple buffering mode, we cycle through all three textures
-            m_currentTextureIndex = (m_currentTextureIndex + 1) % 3;
-            break;
-    }
+    // Switch to the next texture based on double buffering
+    m_currentTextureIndex = (m_currentTextureIndex + 1) % 2;
     
     return true;
 }
@@ -598,11 +572,6 @@ void ScreenCapture::CleanupDXGI() {
     if (m_stagingTextures[1]) {
         m_stagingTextures[1]->Release();
         m_stagingTextures[1] = nullptr;
-    }
-    
-    if (m_stagingTextures[2]) {
-        m_stagingTextures[2]->Release();
-        m_stagingTextures[2] = nullptr;
     }
     
     if (m_acquiredDesktopImage) {
@@ -902,24 +871,10 @@ void ScreenCapture::DrawCursorPixel(std::vector<uint8_t>& frameData, int frameWi
 }
 
 void ScreenCapture::SetBufferingMode(BufferingMode mode) {
-    // Only change buffering mode if it's different from the current one
+    // No need to change buffering mode, we only support double buffering
     if (mode != m_bufferingMode) {
         m_bufferingMode = mode;
-        
-        // Log the change
-        std::cout << "Switching to ";
-        switch (m_bufferingMode) {
-            case BufferingMode::Single:
-                std::cout << "single";
-                break;
-            case BufferingMode::Double:
-                std::cout << "double";
-                break;
-            case BufferingMode::Triple:
-                std::cout << "triple";
-                break;
-        }
-        std::cout << " buffering mode" << std::endl;
+        std::cout << "Using double buffering mode" << std::endl;
     }
 }
 
@@ -950,4 +905,30 @@ uint8_t* ScreenCapture::AlignBuffer(std::vector<uint8_t>& buffer, size_t require
     }
     
     return reinterpret_cast<uint8_t*>(alignedAddress);
+}
+
+// Add the OptimizedCopyFrame method implementation
+void ScreenCapture::OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, 
+                                     int width, int height, LONG srcStride) {
+    // Use Windows Media Foundation optimized copy function
+    // Each pixel is 4 bytes (BGRA format)
+    const LONG bytesPerPixel = 4;
+    const LONG dstStride = width * bytesPerPixel;
+    
+    // MFCopyImage is highly optimized and uses SIMD instructions when available
+    HRESULT hr = MFCopyImage(
+        dst,                // Destination buffer
+        dstStride,          // Destination stride (no padding)
+        src,                // Source buffer
+        srcStride,          // Source stride (might have padding)
+        width * bytesPerPixel, // Width in bytes
+        height              // Number of rows
+    );
+    
+    if (FAILED(hr)) {
+        // Fallback to standard method if MFCopyImage fails
+        for (int y = 0; y < height; y++) {
+            memcpy(dst + y * dstStride, src + y * srcStride, width * bytesPerPixel);
+        }
+    }
 } 

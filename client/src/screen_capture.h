@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <vector>
 #include <cstdint>
+#include <mfapi.h> // Media Foundation for optimized memory operations
 
 // Memory alignment constant - align to 64 bytes for optimal cache line performance
 #define MEMORY_ALIGNMENT 64
@@ -13,9 +14,7 @@ class ScreenCapture {
 public:
     // Buffering mode enum
     enum class BufferingMode {
-        Single,
-        Double,
-        Triple
+        Double
     };
     
     ScreenCapture();
@@ -25,7 +24,7 @@ public:
     bool CaptureFrame(std::vector<uint8_t>& outputBuffer, int& width, int& height);
     float GetFrameRate() const;
     
-    // Set the buffering mode (single, double, or triple)
+    // Set the buffering mode (double)
     void SetBufferingMode(BufferingMode mode);
     
 private:
@@ -39,6 +38,10 @@ private:
     // Memory alignment helpers
     size_t GetAlignedSize(size_t size) const;
     uint8_t* AlignBuffer(std::vector<uint8_t>& buffer, size_t requiredSize);
+    
+    // Optimized memory copy functions
+    void OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, 
+                           int width, int height, LONG srcStride);
     
     // Cursor rendering methods
     void RenderCursorToFrame(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight);
@@ -55,7 +58,7 @@ private:
     ID3D11DeviceContext* m_d3dContext;
     IDXGIOutputDuplication* m_dxgiOutputDuplication;
     ID3D11Texture2D* m_acquiredDesktopImage;
-    ID3D11Texture2D* m_stagingTextures[3]; // Support for up to triple buffering
+    ID3D11Texture2D* m_stagingTextures[2]; // Double buffering only
     int m_currentTextureIndex;
     BufferingMode m_bufferingMode;         // Current buffering mode
     

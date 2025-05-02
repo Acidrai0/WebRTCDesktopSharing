@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+analyze_buffering.ps1
+analyze_logs.py
+analyze_mf_optimization.ps1
+analyze_triple_buffer.py
