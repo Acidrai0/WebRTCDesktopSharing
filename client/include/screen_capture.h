@@ -14,6 +14,7 @@ public:
 
     bool Initialize(int monitorIndex = 0);
     bool CaptureFrame(std::vector<uint8_t>& outputBuffer, int& width, int& height);
+    float GetFrameRate() const;
     
 private:
     bool InitializeDXGI();
@@ -35,6 +36,13 @@ private:
     ID3D11Device* m_d3dDevice = nullptr;
     ID3D11DeviceContext* m_d3dContext = nullptr;
     IDXGIOutputDuplication* m_dxgiOutputDuplication = nullptr;
+    ID3D11Texture2D* m_stagingTexture = nullptr;     // For CPU access to the frame
+    ID3D11Texture2D* m_acquiredDesktopImage = nullptr; // Last acquired desktop image
+    
+    // DXGI cursor info
+    POINT m_cursorPosition = {0, 0};             // Current cursor position
+    bool m_cursorVisible = false;                // Is the cursor currently visible?
+    LARGE_INTEGER m_lastCursorUpdateTime = {0};  // When was the cursor last updated?
     
     // GDI components
     HDC m_hdcScreen = nullptr;
@@ -50,6 +58,11 @@ private:
     // Capture state
     bool m_usingDXGI = true;
     bool m_captureCursor = true;
+    
+    // Performance tracking
+    LARGE_INTEGER m_lastCaptureTime = {0};
+    int m_frameCount = 0;
+    float m_framerate = 0.0f;
     
     // Resource clean-up methods
     void CleanupDXGI();

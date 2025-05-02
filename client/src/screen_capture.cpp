@@ -7,6 +7,22 @@
 ScreenCapture::ScreenCapture() {
     m_usingDXGI = true;
     m_captureCursor = true;
+    m_cursorVisible = false;
+    m_acquiredDesktopImage = nullptr;
+    m_stagingTexture = nullptr;
+    m_frameCount = 0;
+    m_framerate = 0.0f;
+    
+    // Initialize cursor position
+    GetCursorPos(&m_cursorPosition);
+    
+    // Initialize performance counter for framerate calculation
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&m_lastCaptureTime);
+    
+    // Initialize cursor update time
+    m_lastCursorUpdateTime = m_lastCaptureTime;
 }
 
 ScreenCapture::~ScreenCapture() {
@@ -226,6 +242,27 @@ bool ScreenCapture::FallbackToGDI() {
 }
 
 bool ScreenCapture::CaptureFrame(std::vector<uint8_t>& outputBuffer, int& width, int& height) {
+    // Calculate framerate
+    LARGE_INTEGER currentTime;
+    QueryPerformanceCounter(&currentTime);
+    
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    
+    // Calculate time delta
+    double delta = (double)(currentTime.QuadPart - m_lastCaptureTime.QuadPart) / (double)frequency.QuadPart;
+    
+    // Update capture time if significant time has passed
+    if (delta > 0.5) {
+        m_framerate = (float)(m_frameCount / delta);
+        m_frameCount = 0;
+        m_lastCaptureTime = currentTime;
+    }
+    
+    // Increment frame counter
+    m_frameCount++;
+    
+    // Perform the actual capture
     if (m_usingDXGI) {
         if (!CaptureDXGI(outputBuffer, width, height)) {
             std::cout << "DXGI capture failed, falling back to GDI" << std::endl;
@@ -248,105 +285,209 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         return false;
     }
     
-    try {
-        DXGI_OUTDUPL_FRAME_INFO frameInfo;
-        IDXGIResource* desktopResource = nullptr;
+    HRESULT hr = S_OK;
+    
+    // Release the previous frame
+    if (m_acquiredDesktopImage) {
+        m_acquiredDesktopImage->Release();
+        m_acquiredDesktopImage = nullptr;
+    }
+    
+    // Get the next frame
+    IDXGIResource* desktopResource = nullptr;
+    DXGI_OUTDUPL_FRAME_INFO frameInfo;
+    
+    // Try to acquire the next frame within a timeout period
+    const int MAX_ACQUIRE_ATTEMPTS = 3;
+    for (int attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt++) {
+        hr = m_dxgiOutputDuplication->AcquireNextFrame(100, &frameInfo, &desktopResource);
         
-        // Timeout in milliseconds
-        UINT timeoutMs = 100;
-        
-        // Acquire next frame
-        HRESULT hr = m_dxgiOutputDuplication->AcquireNextFrame(timeoutMs, &frameInfo, &desktopResource);
+        if (SUCCEEDED(hr)) {
+            break;
+        }
         
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            // No new frame available, not an error
-            return true;
-        } else if (FAILED(hr)) {
+            // Timeout is normal when there are no changes
+            if (attempt == MAX_ACQUIRE_ATTEMPTS - 1) {
+                return false; // No frame changes after multiple attempts
+            }
+            continue;
+        } 
+        else if (hr == DXGI_ERROR_ACCESS_LOST) {
+            // Access lost, need to recreate duplication
+            CleanupDXGI();
+            if (!InitializeDXGI()) {
+                m_usingDXGI = false;
+                return false;
+            }
+            return CaptureDXGI(outputBuffer, width, height); // Recursive call after reinitialization
+        }
+        else {
+            // Unexpected error
             std::cerr << "Failed to acquire next frame: " << std::hex << hr << std::endl;
             return false;
         }
-        
-        // Get texture
-        ID3D11Texture2D* desktopTexture = nullptr;
-        hr = desktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&desktopTexture));
-        desktopResource->Release();
-        
-        if (FAILED(hr)) {
-            std::cerr << "Failed to query interface for ID3D11Texture2D: " << std::hex << hr << std::endl;
-            m_dxgiOutputDuplication->ReleaseFrame();
-            return false;
-        }
-        
-        // Get texture description
-        D3D11_TEXTURE2D_DESC textureDesc;
-        desktopTexture->GetDesc(&textureDesc);
-        
-        // Create staging texture for CPU access
-        ID3D11Texture2D* stagingTexture = nullptr;
-        textureDesc.Usage = D3D11_USAGE_STAGING;
-        textureDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        textureDesc.BindFlags = 0;
-        textureDesc.MiscFlags = 0;
-        textureDesc.MipLevels = 1;
-        textureDesc.ArraySize = 1;
-        textureDesc.SampleDesc.Count = 1;
-        
-        hr = m_d3dDevice->CreateTexture2D(&textureDesc, nullptr, &stagingTexture);
-        
-        if (FAILED(hr)) {
-            std::cerr << "Failed to create staging texture: " << std::hex << hr << std::endl;
-            desktopTexture->Release();
-            m_dxgiOutputDuplication->ReleaseFrame();
-            return false;
-        }
-        
-        // Copy desktop texture to staging texture
-        m_d3dContext->CopyResource(stagingTexture, desktopTexture);
-        desktopTexture->Release();
-        
-        // Map staging texture
-        D3D11_MAPPED_SUBRESOURCE mappedResource;
-        hr = m_d3dContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
-        
-        if (FAILED(hr)) {
-            std::cerr << "Failed to map staging texture: " << std::hex << hr << std::endl;
-            stagingTexture->Release();
-            m_dxgiOutputDuplication->ReleaseFrame();
-            return false;
-        }
-        
-        // Copy data to output buffer
-        width = textureDesc.Width;
-        height = textureDesc.Height;
-        
-        const size_t bytesPerPixel = 4; // BGRA format
-        const size_t bufferSize = width * height * bytesPerPixel;
-        outputBuffer.resize(bufferSize);
-        
-        const uint8_t* src = static_cast<const uint8_t*>(mappedResource.pData);
-        uint8_t* dst = outputBuffer.data();
-        
-        for (int y = 0; y < height; ++y) {
-            memcpy(dst, src, width * bytesPerPixel);
-            src += mappedResource.RowPitch;
-            dst += width * bytesPerPixel;
-        }
-        
-        // Unmap and release resources
-        m_d3dContext->Unmap(stagingTexture, 0);
-        stagingTexture->Release();
-        m_dxgiOutputDuplication->ReleaseFrame();
-        
-        // Render mouse cursor if enabled
-        if (m_captureCursor) {
-            RenderCursorToFrame(outputBuffer, width, height);
-        }
-        
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Exception during DXGI capture: " << e.what() << std::endl;
+    }
+    
+    if (FAILED(hr)) {
         return false;
     }
+    
+    // Get the desktop image from the resource
+    hr = desktopResource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&m_acquiredDesktopImage));
+    desktopResource->Release();
+    
+    if (FAILED(hr)) {
+        std::cerr << "Failed to QI for ID3D11Texture2D: " << std::hex << hr << std::endl;
+        return false;
+    }
+    
+    // Get texture description
+    D3D11_TEXTURE2D_DESC desc;
+    m_acquiredDesktopImage->GetDesc(&desc);
+    
+    // Create staging texture for CPU access if not already created or if size changed
+    bool needNewStagingTexture = false;
+    if (!m_stagingTexture) {
+        needNewStagingTexture = true;
+    } else {
+        D3D11_TEXTURE2D_DESC stagingDesc;
+        m_stagingTexture->GetDesc(&stagingDesc);
+        
+        if (stagingDesc.Width != desc.Width || stagingDesc.Height != desc.Height) {
+            m_stagingTexture->Release();
+            m_stagingTexture = nullptr;
+            needNewStagingTexture = true;
+        }
+    }
+    
+    if (needNewStagingTexture) {
+        D3D11_TEXTURE2D_DESC stagingDesc = {};
+        stagingDesc.Width = desc.Width;
+        stagingDesc.Height = desc.Height;
+        stagingDesc.MipLevels = 1;
+        stagingDesc.ArraySize = 1;
+        stagingDesc.Format = desc.Format;
+        stagingDesc.SampleDesc.Count = 1;
+        stagingDesc.SampleDesc.Quality = 0;
+        stagingDesc.Usage = D3D11_USAGE_STAGING;
+        stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        stagingDesc.BindFlags = 0;
+        stagingDesc.MiscFlags = 0;
+        
+        hr = m_d3dDevice->CreateTexture2D(&stagingDesc, nullptr, &m_stagingTexture);
+        if (FAILED(hr)) {
+            std::cerr << "Failed to create staging texture: " << std::hex << hr << std::endl;
+            m_dxgiOutputDuplication->ReleaseFrame();
+            return false;
+        }
+    }
+    
+    // Copy the acquired image to the staging texture
+    m_d3dContext->CopyResource(m_stagingTexture, m_acquiredDesktopImage);
+    
+    // Map the staging texture to get access to the data
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = m_d3dContext->Map(m_stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+    
+    if (FAILED(hr)) {
+        std::cerr << "Failed to map staging texture: " << std::hex << hr << std::endl;
+        m_dxgiOutputDuplication->ReleaseFrame();
+        return false;
+    }
+    
+    // Update output dimensions
+    width = desc.Width;
+    height = desc.Height;
+    
+    // Resize output buffer if needed
+    size_t requiredSize = width * height * 4; // BGRA format (4 bytes per pixel)
+    if (outputBuffer.size() != requiredSize) {
+        outputBuffer.resize(requiredSize);
+    }
+    
+    // Copy the data
+    uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
+    uint8_t* dst = outputBuffer.data();
+    
+    if (mappedResource.RowPitch == width * 4) {
+        // Rows are packed with no padding, can copy the entire buffer at once
+        memcpy(dst, src, requiredSize);
+    } else {
+        // Rows have padding, need to copy each row separately
+        for (int y = 0; y < height; y++) {
+            memcpy(dst + y * width * 4, src + y * mappedResource.RowPitch, width * 4);
+        }
+    }
+    
+    // Unmap the texture
+    m_d3dContext->Unmap(m_stagingTexture, 0);
+    
+    // Add cursor to the frame if mouse is visible
+    if (m_captureCursor) {
+        // Get current time for cursor timeout handling
+        LARGE_INTEGER currentTime;
+        QueryPerformanceCounter(&currentTime);
+        
+        // Update cursor visibility and position from frame info if available
+        if (frameInfo.LastMouseUpdateTime.QuadPart != 0) {
+            // Update cursor from DXGI information
+            m_cursorVisible = frameInfo.PointerPosition.Visible != 0;
+            
+            if (m_cursorVisible) {
+                // Update cursor position
+                m_cursorPosition.x = frameInfo.PointerPosition.Position.x;
+                m_cursorPosition.y = frameInfo.PointerPosition.Position.y;
+                
+                // Update last cursor time
+                m_lastCursorUpdateTime = currentTime;
+            }
+        } else {
+            // If DXGI doesn't provide cursor updates, we need to handle it:
+            
+            // Check if cursor hasn't been updated recently (over 100ms)
+            LARGE_INTEGER frequency;
+            QueryPerformanceFrequency(&frequency);
+            double timeSinceLastCursorUpdate = 
+                (double)(currentTime.QuadPart - m_lastCursorUpdateTime.QuadPart) / 
+                (double)frequency.QuadPart;
+            
+            // If cursor info is stale (over 100ms) or cursor isn't visible, try to get it from system
+            if (timeSinceLastCursorUpdate > 0.1 || !m_cursorVisible) {
+                POINT position;
+                CURSORINFO cursorInfo = {0};
+                cursorInfo.cbSize = sizeof(CURSORINFO);
+                
+                if (GetCursorPos(&position) && ::GetCursorInfo(&cursorInfo) && 
+                    (cursorInfo.flags & CURSOR_SHOWING)) {
+                    m_cursorPosition = position;
+                    m_cursorVisible = true;
+                    m_lastCursorUpdateTime = currentTime;
+                }
+            }
+        }
+        
+        // Always render the cursor if it's visible, even if position hasn't changed
+        if (m_cursorVisible) {
+            RenderCursorToFrame(outputBuffer, width, height);
+        }
+    }
+    
+    // Release the frame
+    hr = m_dxgiOutputDuplication->ReleaseFrame();
+    if (FAILED(hr)) {
+        std::cerr << "Failed to release frame: " << std::hex << hr << std::endl;
+        
+        if (hr == DXGI_ERROR_ACCESS_LOST) {
+            // Need to recreate the duplication
+            CleanupDXGI();
+            InitializeDXGI();
+        }
+        
+        // Return true anyway since we've already got the frame data
+    }
+    
+    return true;
 }
 
 bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, int& height) {
@@ -394,7 +535,25 @@ bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, i
         
         // Render mouse cursor if enabled
         if (m_captureCursor) {
-            RenderCursorToFrame(outputBuffer, width, height);
+            // For GDI capture, always update cursor position
+            POINT position;
+            CURSORINFO cursorInfo = {0};
+            cursorInfo.cbSize = sizeof(CURSORINFO);
+            
+            if (GetCursorPos(&position) && ::GetCursorInfo(&cursorInfo) && 
+                (cursorInfo.flags & CURSOR_SHOWING)) {
+                m_cursorPosition = position;
+                m_cursorVisible = true;
+                
+                // Update cursor timestamp
+                QueryPerformanceCounter(&m_lastCursorUpdateTime);
+            } else {
+                m_cursorVisible = false;
+            }
+            
+            if (m_cursorVisible) {
+                RenderCursorToFrame(outputBuffer, width, height);
+            }
         }
         
         return true;
@@ -404,18 +563,73 @@ bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, i
     }
 }
 
-void ScreenCapture::RenderCursorToFrame(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight) {
-    // Get cursor info
-    POINT cursorPos;
-    HCURSOR cursor;
+void ScreenCapture::CleanupDXGI() {
+    if (m_dxgiOutputDuplication) {
+        m_dxgiOutputDuplication->Release();
+        m_dxgiOutputDuplication = nullptr;
+    }
     
-    if (GetCursorInfo(cursorPos, cursor)) {
-        // Convert cursor position to monitor relative
-        cursorPos.x -= m_monitorRect.left;
-        cursorPos.y -= m_monitorRect.top;
-        
-        // Draw cursor
-        DrawCursor(frameData, frameWidth, frameHeight, cursorPos, cursor);
+    if (m_stagingTexture) {
+        m_stagingTexture->Release();
+        m_stagingTexture = nullptr;
+    }
+    
+    if (m_acquiredDesktopImage) {
+        m_acquiredDesktopImage->Release();
+        m_acquiredDesktopImage = nullptr;
+    }
+    
+    if (m_d3dContext) {
+        m_d3dContext->Release();
+        m_d3dContext = nullptr;
+    }
+    
+    if (m_d3dDevice) {
+        m_d3dDevice->Release();
+        m_d3dDevice = nullptr;
+    }
+}
+
+void ScreenCapture::CleanupGDI() {
+    if (m_hBitmap) {
+        DeleteObject(m_hBitmap);
+        m_hBitmap = nullptr;
+    }
+    
+    if (m_hdcMemory) {
+        DeleteDC(m_hdcMemory);
+        m_hdcMemory = nullptr;
+    }
+    
+    if (m_hdcScreen) {
+        DeleteDC(m_hdcScreen);
+        m_hdcScreen = nullptr;
+    }
+}
+
+// Add a method to get the current framerate
+float ScreenCapture::GetFrameRate() const {
+    return m_framerate;
+}
+
+void ScreenCapture::RenderCursorToFrame(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight) {
+    if (!m_cursorVisible) {
+        return;  // Don't render if cursor is not visible
+    }
+    
+    // Calculate the cursor position relative to the captured area
+    POINT adjustedPosition = m_cursorPosition;
+    adjustedPosition.x -= m_monitorRect.left;
+    adjustedPosition.y -= m_monitorRect.top;
+    
+    // Get system cursor
+    POINT position;
+    HCURSOR cursor;
+    if (GetCursorInfo(position, cursor)) {
+        // Adjust position for monitor offset
+        position.x -= m_monitorRect.left;
+        position.y -= m_monitorRect.top;
+        DrawCursor(frameData, frameWidth, frameHeight, position, cursor);
     }
 }
 
@@ -426,7 +640,7 @@ bool ScreenCapture::GetCursorInfo(POINT& position, HCURSOR& cursor) {
         return false;
     }
     
-    // Get cursor handle
+    // Get cursor info
     CURSORINFO cursorInfo = {0};
     cursorInfo.cbSize = sizeof(CURSORINFO);
     
@@ -435,11 +649,12 @@ bool ScreenCapture::GetCursorInfo(POINT& position, HCURSOR& cursor) {
         return false;
     }
     
+    // Check if cursor is visible
     if (!(cursorInfo.flags & CURSOR_SHOWING)) {
-        // Cursor is hidden
         return false;
     }
     
+    // Get cursor handle
     cursor = cursorInfo.hCursor;
     return true;
 }
@@ -460,8 +675,10 @@ void ScreenCapture::DrawCursor(std::vector<uint8_t>& frameData, int frameWidth, 
     HCURSOR ibeamCursor = LoadCursor(nullptr, IDC_IBEAM);
     if (cursor == ibeamCursor) {
         DrawIBeamCursor(frameData, frameWidth, frameHeight, position);
+        DestroyCursor(ibeamCursor);
         return;
     }
+    DestroyCursor(ibeamCursor);
     
     // Get cursor dimensions and hotspot
     BITMAP bmpInfo;
@@ -517,10 +734,12 @@ void ScreenCapture::DrawCursor(std::vector<uint8_t>& frameData, int frameWidth, 
         std::cerr << "Failed to get DIBits for cursor: " << GetLastError() << std::endl;
         
         // Try with the default system cursor for I-beam as a fallback
-        if (cursor == ibeamCursor) {
+        HCURSOR fallbackCursor = LoadCursor(nullptr, IDC_IBEAM);
+        if (cursor == fallbackCursor) {
             // Draw a simple I-beam cursor manually
             DrawIBeamCursor(frameData, frameWidth, frameHeight, position);
         }
+        DestroyCursor(fallbackCursor);
         
         // Clean up resources
         SelectObject(hdcMem, hbmpOld);
@@ -603,7 +822,6 @@ void ScreenCapture::DrawCursor(std::vector<uint8_t>& frameData, int frameWidth, 
     }
 }
 
-// Helper method to draw an I-beam cursor manually
 void ScreenCapture::DrawIBeamCursor(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight, const POINT& position) {
     const int cursorHeight = 21;
     const int cursorWidth = 11;
@@ -638,7 +856,6 @@ void ScreenCapture::DrawIBeamCursor(std::vector<uint8_t>& frameData, int frameWi
     }
 }
 
-// Helper to draw a single pixel for the cursor with bounds checking
 void ScreenCapture::DrawCursorPixel(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight, 
                                    int x, int y, int bytesPerPixel, uint8_t r, uint8_t g, uint8_t b) {
     if (x < 0 || x >= frameWidth || y < 0 || y >= frameHeight) {
@@ -651,38 +868,4 @@ void ScreenCapture::DrawCursorPixel(std::vector<uint8_t>& frameData, int frameWi
     frameData[frameIndex + 1] = g; // G
     frameData[frameIndex + 2] = r; // R
     frameData[frameIndex + 3] = 255; // A
-}
-
-void ScreenCapture::CleanupDXGI() {
-    if (m_dxgiOutputDuplication) {
-        m_dxgiOutputDuplication->Release();
-        m_dxgiOutputDuplication = nullptr;
-    }
-    
-    if (m_d3dContext) {
-        m_d3dContext->Release();
-        m_d3dContext = nullptr;
-    }
-    
-    if (m_d3dDevice) {
-        m_d3dDevice->Release();
-        m_d3dDevice = nullptr;
-    }
-}
-
-void ScreenCapture::CleanupGDI() {
-    if (m_hBitmap) {
-        DeleteObject(m_hBitmap);
-        m_hBitmap = nullptr;
-    }
-    
-    if (m_hdcMemory) {
-        DeleteDC(m_hdcMemory);
-        m_hdcMemory = nullptr;
-    }
-    
-    if (m_hdcScreen) {
-        DeleteDC(m_hdcScreen);
-        m_hdcScreen = nullptr;
-    }
 } 
