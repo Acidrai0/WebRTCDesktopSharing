@@ -10,6 +10,7 @@
 #include <chrono>
 #include <atomic>
 #include <csignal>
+#include <Windows.h>
 
 // Global flag to control the main loop
 std::atomic<bool> g_running = true;
@@ -82,7 +83,7 @@ int main(int argc, char* argv[]) {
     
     std::cout << "Captured screen with dimensions: " << width << "x" << height << std::endl;
     
-    // Initialize encoder
+    // Initialize encoder (which now handles frame rate control in a separate thread)
     Encoder encoder;
     if (!encoder.Initialize(width, height, fps, bitrate)) {
         std::cerr << "Failed to initialize encoder" << std::endl;
@@ -104,12 +105,15 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // Main capture loop
-    auto lastFrameTime = std::chrono::high_resolution_clock::now();
-    auto frameInterval = std::chrono::milliseconds(1000 / fps);
+    // Tracking statistics for display
+    LARGE_INTEGER frequency, statsLastTime;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&statsLastTime);
+    unsigned frameCount = 0;
     
     std::cout << "Starting capture loop..." << std::endl;
     
+    // Main capture loop is now simpler - no need to manage timing for encoding
     while (g_running) {
         // Capture frame
         if (screenCapture.CaptureFrame(frameBuffer, width, height)) {
@@ -127,22 +131,33 @@ int main(int argc, char* argv[]) {
                 }
             }
             
-            // Encode frame
+            // Send frame to encoder (which now handles timing in a separate thread)
             encoder.EncodeFrame(frameBuffer, width, height);
+            
+            // Update statistics
+            frameCount++;
+            
+            // Print statistics every second
+            LARGE_INTEGER currentTime;
+            QueryPerformanceCounter(&currentTime);
+            LONGLONG elapsed = currentTime.QuadPart - statsLastTime.QuadPart;
+            
+            if (elapsed > frequency.QuadPart) {  // 1 second interval
+                float captureRate = (float)(frameCount * frequency.QuadPart) / elapsed;
+                std::cout << "Capture rate: " << captureRate << " fps, Capture FPS: " << screenCapture.GetFrameRate() << std::endl;
+                
+                frameCount = 0;
+                statsLastTime = currentTime;
+            }
         } else {
             std::cerr << "Frame capture failed" << std::endl;
+            
+            // Small delay on failure to avoid CPU spinning
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
-        // Calculate time until next frame
-        auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastFrameTime);
-        auto sleepTime = frameInterval - elapsed;
-        
-        if (sleepTime > std::chrono::milliseconds(0)) {
-            std::this_thread::sleep_for(sleepTime);
-        }
-        
-        lastFrameTime = std::chrono::high_resolution_clock::now();
+        // Slight delay to avoid maxing out CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     
     std::cout << "Shutting down..." << std::endl;
