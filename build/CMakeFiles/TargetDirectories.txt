@@ -1,0 +1,5 @@
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/build/CMakeFiles/edit_cache.dir
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/build/CMakeFiles/rebuild_cache.dir
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/build/client/CMakeFiles/desktop_sharing_client.dir
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/build/client/CMakeFiles/edit_cache.dir
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/build/client/CMakeFiles/rebuild_cache.dir

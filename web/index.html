@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Desktop Sharing</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>WebRTC Desktop Sharing</h1>
+            <div id="connection-status">Disconnected</div>
+        </header>
+
+        <main>
+            <div class="video-container">
+                <video id="remote-video" autoplay playsinline></video>
+                <div id="no-stream-message">No stream available</div>
+            </div>
+
+            <aside class="control-panel">
+                <div class="panel-section">
+                    <h2>Connection</h2>
+                    <div class="status-container">
+                        <div>Status: <span id="connection-text">Not connected</span></div>
+                        <div>Peer: <span id="peer-id">None</span></div>
+                    </div>
+                    <div class="button-container">
+                        <button id="connect-button">Connect to Server</button>
+                        <button id="disconnect-button" disabled>Disconnect</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>Available Peers</h2>
+                    <div class="client-list-container">
+                        <ul id="client-list">
+                            <li class="no-clients">No clients available</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>Video Controls</h2>
+                    <div class="video-controls">
+                        <button id="fullscreen-button" disabled>Fullscreen</button>
+                        <div class="quality-controls">
+                            <label for="quality-selector">Quality:</label>
+                            <select id="quality-selector" disabled>
+                                <option value="high">High</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <footer>
+            <p>WebRTC Desktop Sharing Application</p>
+        </footer>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html> 
