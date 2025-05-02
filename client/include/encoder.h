@@ -29,6 +29,9 @@ struct EncoderFrame {
 // Define a callback type for receiving encoded H.264 data
 using EncodedFrameCallback = std::function<void(const uint8_t* data, size_t size, bool isKeyFrame)>;
 
+// Define a callback type for receiving encoder statistics
+using EncoderStatsCallback = std::function<void(float fps, int queueSize)>;
+
 class Encoder {
 public:
     Encoder();
@@ -39,6 +42,9 @@ public:
     
     // Set callback for encoded data
     void SetCallback(EncodedFrameCallback callback) { m_callback = callback; }
+    
+    // Set callback for encoder statistics
+    void SetStatsCallback(EncoderStatsCallback callback) { m_statsCallback = callback; }
 
 private:
     // File output methods
@@ -72,6 +78,9 @@ private:
     // Callback for encoded data
     EncodedFrameCallback m_callback;
     
+    // Callback for statistics
+    EncoderStatsCallback m_statsCallback;
+    
     // Output file
     std::ofstream m_outputFile;
     
@@ -86,4 +95,9 @@ private:
     // Helper methods
     bool ConvertBGRAtoYUV(const std::vector<uint8_t>& bgraFrame);
     bool EncodeFrameInternal(const EncoderFrame& frame);
+    
+    // Performance statistics
+    float m_actualFps = 0.0f;
+    LARGE_INTEGER m_lastStatsTime;
+    int m_statsFrameCount = 0;
 }; 

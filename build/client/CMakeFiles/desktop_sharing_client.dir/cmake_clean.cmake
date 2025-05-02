@@ -6,6 +6,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/desktop_sharing_client.dir/src/encoder.cpp.obj.d"
   "CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj"
   "CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj.d"
+  "CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj"
+  "CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj.d"
   "CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj"
   "CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj.d"
   "CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj"

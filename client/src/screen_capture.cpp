@@ -9,9 +9,14 @@ ScreenCapture::ScreenCapture() {
     m_captureCursor = true;
     m_cursorVisible = false;
     m_acquiredDesktopImage = nullptr;
-    m_stagingTexture = nullptr;
+    m_stagingTextures[0] = nullptr;
+    m_stagingTextures[1] = nullptr;
+    m_stagingTextures[2] = nullptr;
+    m_currentTextureIndex = 0;
     m_frameCount = 0;
     m_framerate = 0.0f;
+    m_bufferingMode = BufferingMode::Double; // Default to double buffering
+    m_alignedBufferPadding = MEMORY_ALIGNMENT; // Set default padding for alignment
     
     // Initialize cursor position
     GetCursorPos(&m_cursorPosition);
@@ -348,15 +353,15 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     
     // Create staging texture for CPU access if not already created or if size changed
     bool needNewStagingTexture = false;
-    if (!m_stagingTexture) {
+    if (!m_stagingTextures[m_currentTextureIndex]) {
         needNewStagingTexture = true;
     } else {
         D3D11_TEXTURE2D_DESC stagingDesc;
-        m_stagingTexture->GetDesc(&stagingDesc);
+        m_stagingTextures[m_currentTextureIndex]->GetDesc(&stagingDesc);
         
         if (stagingDesc.Width != desc.Width || stagingDesc.Height != desc.Height) {
-            m_stagingTexture->Release();
-            m_stagingTexture = nullptr;
+            m_stagingTextures[m_currentTextureIndex]->Release();
+            m_stagingTextures[m_currentTextureIndex] = nullptr;
             needNewStagingTexture = true;
         }
     }
@@ -375,7 +380,7 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         stagingDesc.BindFlags = 0;
         stagingDesc.MiscFlags = 0;
         
-        hr = m_d3dDevice->CreateTexture2D(&stagingDesc, nullptr, &m_stagingTexture);
+        hr = m_d3dDevice->CreateTexture2D(&stagingDesc, nullptr, &m_stagingTextures[m_currentTextureIndex]);
         if (FAILED(hr)) {
             std::cerr << "Failed to create staging texture: " << std::hex << hr << std::endl;
             m_dxgiOutputDuplication->ReleaseFrame();
@@ -384,11 +389,11 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     }
     
     // Copy the acquired image to the staging texture
-    m_d3dContext->CopyResource(m_stagingTexture, m_acquiredDesktopImage);
+    m_d3dContext->CopyResource(m_stagingTextures[m_currentTextureIndex], m_acquiredDesktopImage);
     
     // Map the staging texture to get access to the data
     D3D11_MAPPED_SUBRESOURCE mappedResource;
-    hr = m_d3dContext->Map(m_stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+    hr = m_d3dContext->Map(m_stagingTextures[m_currentTextureIndex], 0, D3D11_MAP_READ, 0, &mappedResource);
     
     if (FAILED(hr)) {
         std::cerr << "Failed to map staging texture: " << std::hex << hr << std::endl;
@@ -400,28 +405,26 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     width = desc.Width;
     height = desc.Height;
     
-    // Resize output buffer if needed
+    // Resize output buffer if needed and ensure it's aligned
     size_t requiredSize = width * height * 4; // BGRA format (4 bytes per pixel)
-    if (outputBuffer.size() != requiredSize) {
-        outputBuffer.resize(requiredSize);
-    }
+    uint8_t* alignedDst = AlignBuffer(outputBuffer, requiredSize);
     
     // Copy the data
     uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
-    uint8_t* dst = outputBuffer.data();
     
     if (mappedResource.RowPitch == width * 4) {
         // Rows are packed with no padding, can copy the entire buffer at once
-        memcpy(dst, src, requiredSize);
+        memcpy(alignedDst, src, requiredSize);
     } else {
         // Rows have padding, need to copy each row separately
+        // Use aligned destination pointer for better cache performance
         for (int y = 0; y < height; y++) {
-            memcpy(dst + y * width * 4, src + y * mappedResource.RowPitch, width * 4);
+            memcpy(alignedDst + y * width * 4, src + y * mappedResource.RowPitch, width * 4);
         }
     }
     
     // Unmap the texture
-    m_d3dContext->Unmap(m_stagingTexture, 0);
+    m_d3dContext->Unmap(m_stagingTextures[m_currentTextureIndex], 0);
     
     // Add cursor to the frame if mouse is visible
     if (m_captureCursor) {
@@ -485,6 +488,24 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         }
         
         // Return true anyway since we've already got the frame data
+    }
+    
+    // Switch to the next texture based on the buffering mode
+    switch (m_bufferingMode) {
+        case BufferingMode::Single:
+            // In single buffering mode, we always use the same texture (index 0)
+            m_currentTextureIndex = 0;
+            break;
+            
+        case BufferingMode::Double:
+            // In double buffering mode, we alternate between textures 0 and 1
+            m_currentTextureIndex = (m_currentTextureIndex + 1) % 2;
+            break;
+            
+        case BufferingMode::Triple:
+            // In triple buffering mode, we cycle through all three textures
+            m_currentTextureIndex = (m_currentTextureIndex + 1) % 3;
+            break;
     }
     
     return true;
@@ -569,9 +590,19 @@ void ScreenCapture::CleanupDXGI() {
         m_dxgiOutputDuplication = nullptr;
     }
     
-    if (m_stagingTexture) {
-        m_stagingTexture->Release();
-        m_stagingTexture = nullptr;
+    if (m_stagingTextures[0]) {
+        m_stagingTextures[0]->Release();
+        m_stagingTextures[0] = nullptr;
+    }
+    
+    if (m_stagingTextures[1]) {
+        m_stagingTextures[1]->Release();
+        m_stagingTextures[1] = nullptr;
+    }
+    
+    if (m_stagingTextures[2]) {
+        m_stagingTextures[2]->Release();
+        m_stagingTextures[2] = nullptr;
     }
     
     if (m_acquiredDesktopImage) {
@@ -868,4 +899,55 @@ void ScreenCapture::DrawCursorPixel(std::vector<uint8_t>& frameData, int frameWi
     frameData[frameIndex + 1] = g; // G
     frameData[frameIndex + 2] = r; // R
     frameData[frameIndex + 3] = 255; // A
+}
+
+void ScreenCapture::SetBufferingMode(BufferingMode mode) {
+    // Only change buffering mode if it's different from the current one
+    if (mode != m_bufferingMode) {
+        m_bufferingMode = mode;
+        
+        // Log the change
+        std::cout << "Switching to ";
+        switch (m_bufferingMode) {
+            case BufferingMode::Single:
+                std::cout << "single";
+                break;
+            case BufferingMode::Double:
+                std::cout << "double";
+                break;
+            case BufferingMode::Triple:
+                std::cout << "triple";
+                break;
+        }
+        std::cout << " buffering mode" << std::endl;
+    }
+}
+
+// Calculate the required size for a buffer, including extra padding for alignment
+size_t ScreenCapture::GetAlignedSize(size_t size) const {
+    return size + m_alignedBufferPadding;
+}
+
+// Get aligned pointer from buffer
+uint8_t* ScreenCapture::AlignBuffer(std::vector<uint8_t>& buffer, size_t requiredSize) {
+    // Resize the buffer to include extra padding for alignment
+    size_t alignedSize = GetAlignedSize(requiredSize);
+    
+    if (buffer.size() < alignedSize) {
+        buffer.resize(alignedSize);
+    }
+    
+    // Calculate the aligned pointer
+    uintptr_t address = reinterpret_cast<uintptr_t>(buffer.data());
+    uintptr_t alignedAddress = (address + MEMORY_ALIGNMENT - 1) & ~(MEMORY_ALIGNMENT - 1);
+    
+    // Make sure we have enough space in the buffer
+    if (alignedAddress + requiredSize > address + buffer.size()) {
+        // If we don't have enough space, resize the buffer again
+        size_t extraPadding = alignedAddress - address;
+        buffer.resize(requiredSize + extraPadding);
+        alignedAddress = (reinterpret_cast<uintptr_t>(buffer.data()) + MEMORY_ALIGNMENT - 1) & ~(MEMORY_ALIGNMENT - 1);
+    }
+    
+    return reinterpret_cast<uint8_t*>(alignedAddress);
 } 

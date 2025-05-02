@@ -6,7 +6,7 @@
 #include <ctime>
 #include <thread>
 
-Encoder::Encoder() : m_frameCount(0), m_encoder(nullptr), m_firstFrame(true) {
+Encoder::Encoder() : m_frameCount(0), m_encoder(nullptr), m_firstFrame(true), m_actualFps(0.0f), m_statsFrameCount(0), m_statsCallback(nullptr) {
     std::cout << "Encoder created" << std::endl;
     
     // Initialize x264 picture structures
@@ -15,6 +15,7 @@ Encoder::Encoder() : m_frameCount(0), m_encoder(nullptr), m_firstFrame(true) {
     
     // Initialize performance counter for timestamp generation
     QueryPerformanceFrequency(&m_frequency);
+    QueryPerformanceCounter(&m_lastStatsTime);
 }
 
 Encoder::~Encoder() {
@@ -212,6 +213,7 @@ void Encoder::EncodingThreadFunc() {
     
     // Stats for monitoring
     int framesEncoded = 0;
+    LARGE_INTEGER statsTimePoint;
     LONGLONG lastStatsTime = startTime.QuadPart;
     
     // Main encoding loop
@@ -234,8 +236,25 @@ void Encoder::EncodingThreadFunc() {
                 waitMs = std::chrono::milliseconds((waitTime * 1000) / m_frequency.QuadPart);
             }
             
+            // Check if the stats callback is registered and call it
+            if (m_statsCallback) {
+                // Calculate current FPS
+                LONGLONG elapsedTicks = currentTime.QuadPart - m_lastStatsTime.QuadPart;
+                double elapsedSeconds = static_cast<double>(elapsedTicks) / static_cast<double>(m_frequency.QuadPart);
+                
+                // Only update stats every quarter second to avoid excessive calculation
+                if (elapsedSeconds >= 0.25) {
+                    m_actualFps = static_cast<float>(m_statsFrameCount / elapsedSeconds);
+                    m_statsFrameCount = 0;
+                    m_lastStatsTime = currentTime;
+                    
+                    // Call the stats callback with current FPS and queue size
+                    m_statsCallback(m_actualFps, m_frameQueue.size());
+                }
+            }
+            
             // Wait for frame or timeout
-            auto waitResult = m_queueCV.wait_for(lock, waitMs, 
+            m_queueCV.wait_for(lock, waitMs, 
                 [this] { return !m_frameQueue.empty() || !m_running; });
             
             // If we have a frame and we're still running, process it
@@ -250,42 +269,35 @@ void Encoder::EncodingThreadFunc() {
         LARGE_INTEGER currentTime;
         QueryPerformanceCounter(&currentTime);
         
-        // If current time has passed the next frame time, it's time to encode
-        if (currentTime.QuadPart >= nextFrameTime) {
-            // If we have a frame, encode it
-            if (hasFrame) {
-                // Encode the frame
-                EncodeFrameInternal(frame);
+        // If we've got a frame to process
+        if (hasFrame) {
+            // Process the frame
+            if (EncodeFrameInternal(frame)) {
                 framesEncoded++;
+                m_statsFrameCount++;
                 
-                // Output stats every second
-                if (currentTime.QuadPart - lastStatsTime > m_frequency.QuadPart) {
-                    double elapsed = static_cast<double>(currentTime.QuadPart - lastStatsTime) / m_frequency.QuadPart;
-                    double fps = framesEncoded / elapsed;
+                // Output encoder FPS periodically
+                double elapsed = static_cast<double>(currentTime.QuadPart - lastStatsTime) / static_cast<double>(m_frequency.QuadPart);
+                if (elapsed >= 2.0) {
+                    float fps = static_cast<float>(framesEncoded / elapsed);
                     std::cout << "Encoder actual FPS: " << fps << std::endl;
-                    
                     framesEncoded = 0;
-                    lastStatsTime = currentTime.QuadPart;
+                    QueryPerformanceCounter(&statsTimePoint);
+                    lastStatsTime = statsTimePoint.QuadPart;
                 }
-            }
-            
-            // Calculate next frame time (based on the ideal timing, not actual)
-            nextFrameTime += targetInterval;
-            
-            // If we've fallen too far behind, reset timing
-            if (currentTime.QuadPart > nextFrameTime + targetInterval * 5) {
-                std::cout << "Encoder too far behind, resetting timing" << std::endl;
-                nextFrameTime = currentTime.QuadPart + targetInterval;
+                
+                // Calculate next frame time
+                nextFrameTime += targetInterval;
+                
+                // If we're falling too far behind, reset timing
+                if (currentTime.QuadPart - nextFrameTime > targetInterval * 3) {
+                    std::cout << "Encoder too far behind, resetting timing" << std::endl;
+                    nextFrameTime = currentTime.QuadPart;
+                }
             }
         } else {
-            // We're ahead of schedule, sleep until next frame time
-            LONGLONG sleepTime = nextFrameTime - currentTime.QuadPart;
-            if (sleepTime > 0) {
-                DWORD sleepMs = static_cast<DWORD>((sleepTime * 1000) / m_frequency.QuadPart);
-                if (sleepMs > 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
-                }
-            }
+            // We didn't get a frame, try again soon
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 }

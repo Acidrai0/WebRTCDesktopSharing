@@ -103,12 +103,12 @@ client/clean: client/CMakeFiles/desktop_sharing_client.dir/clean
 client/CMakeFiles/desktop_sharing_client.dir/all:
 	$(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/depend
 	$(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=1,2,3,4,5,6 "Built target desktop_sharing_client"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=1,2,3,4,5,6,7 "Built target desktop_sharing_client"
 .PHONY : client/CMakeFiles/desktop_sharing_client.dir/all
 
 # Build rule for subdir invocation for target.
 client/CMakeFiles/desktop_sharing_client.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles 6
+	$(CMAKE_COMMAND) -E cmake_progress_start C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 client/CMakeFiles/desktop_sharing_client.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles 0
 .PHONY : client/CMakeFiles/desktop_sharing_client.dir/rule
@@ -120,7 +120,7 @@ desktop_sharing_client: client/CMakeFiles/desktop_sharing_client.dir/rule
 # codegen rule for target.
 client/CMakeFiles/desktop_sharing_client.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=1,2,3,4,5,6 "Finished codegen for target desktop_sharing_client"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=1,2,3,4,5,6,7 "Finished codegen for target desktop_sharing_client"
 .PHONY : client/CMakeFiles/desktop_sharing_client.dir/codegen
 
 # clean rule for target.

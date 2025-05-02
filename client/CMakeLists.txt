@@ -37,6 +37,7 @@ set(SOURCES
     src/encoder.cpp
     src/webrtc_session.cpp
     src/preview_window.cpp
+    src/performance_logger.cpp
 )
 
 # Define the executable
@@ -48,6 +49,7 @@ target_link_libraries(desktop_sharing_client PRIVATE
     dxgi
     d3d11
     d3dcompiler
+    psapi
     ${X264_LIBRARY_PATH}
 )
 

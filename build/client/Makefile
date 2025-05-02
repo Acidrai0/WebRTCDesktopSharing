@@ -177,6 +177,30 @@ src/main.cpp.s:
 	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
 
+src/performance_logger.obj: src/performance_logger.cpp.obj
+.PHONY : src/performance_logger.obj
+
+# target to build an object file
+src/performance_logger.cpp.obj:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj
+.PHONY : src/performance_logger.cpp.obj
+
+src/performance_logger.i: src/performance_logger.cpp.i
+.PHONY : src/performance_logger.i
+
+# target to preprocess a source file
+src/performance_logger.cpp.i:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.i
+.PHONY : src/performance_logger.cpp.i
+
+src/performance_logger.s: src/performance_logger.cpp.s
+.PHONY : src/performance_logger.s
+
+# target to generate assembly for a file
+src/performance_logger.cpp.s:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.s
+.PHONY : src/performance_logger.cpp.s
+
 src/preview_window.obj: src/preview_window.cpp.obj
 .PHONY : src/preview_window.obj
 
@@ -264,6 +288,9 @@ help:
 	@echo ... src/main.obj
 	@echo ... src/main.i
 	@echo ... src/main.s
+	@echo ... src/performance_logger.obj
+	@echo ... src/performance_logger.i
+	@echo ... src/performance_logger.s
 	@echo ... src/preview_window.obj
 	@echo ... src/preview_window.i
 	@echo ... src/preview_window.s

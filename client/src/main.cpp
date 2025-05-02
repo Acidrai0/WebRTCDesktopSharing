@@ -2,6 +2,7 @@
 #include "encoder.h"
 #include "webrtc_session.h"
 #include "preview_window.h"
+#include "performance_logger.h"
 
 #include <iostream>
 #include <string>
@@ -29,6 +30,9 @@ int main(int argc, char* argv[]) {
     int bitrate = 2000000;
     bool showPreview = true;
     float previewScale = 1.0f;  // Changed from 0.75f to 1.0f for pixel-perfect display
+    std::string logFile = "performance_double_buffered.csv";
+    bool enableLogging = false;
+    std::string bufferingMode = "double"; // Default to double buffering
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -44,6 +48,17 @@ int main(int argc, char* argv[]) {
             showPreview = false;
         } else if (arg == "--preview-scale" && i + 1 < argc) {
             previewScale = std::stof(argv[++i]);
+        } else if (arg == "--log-file" && i + 1 < argc) {
+            logFile = argv[++i];
+            enableLogging = true;
+        } else if (arg == "--enable-logging") {
+            enableLogging = true;
+        } else if (arg == "--buffering-mode" && i + 1 < argc) {
+            bufferingMode = argv[++i];
+            if (bufferingMode != "single" && bufferingMode != "double" && bufferingMode != "triple") {
+                std::cerr << "Invalid buffering mode: " << bufferingMode << ". Using default (double)." << std::endl;
+                bufferingMode = "double";
+            }
         } else if (arg == "--help") {
             std::cout << "Desktop Sharing Client" << std::endl;
             std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -54,6 +69,9 @@ int main(int argc, char* argv[]) {
             std::cout << "  --bitrate <bitrate>       Target bitrate in bps (default: 2000000)" << std::endl;
             std::cout << "  --no-preview              Disable preview window" << std::endl;
             std::cout << "  --preview-scale <scale>   Scale preview window (default: 1.0)" << std::endl;
+            std::cout << "  --buffering-mode <mode>   Buffering mode: single, double, or triple (default: double)" << std::endl;
+            std::cout << "  --enable-logging          Enable performance logging" << std::endl;
+            std::cout << "  --log-file <filename>     Log file name (default: performance_double_buffered.csv)" << std::endl;
             std::cout << "  --help                    Show this help message" << std::endl;
             return 0;
         }
@@ -61,6 +79,17 @@ int main(int argc, char* argv[]) {
     
     std::cout << "Starting desktop sharing client" << std::endl;
     std::cout << "Press Ctrl+C to exit" << std::endl;
+    std::cout << "Using " << bufferingMode << " buffering mode" << std::endl;
+    
+    // Initialize performance logger if enabled
+    if (enableLogging) {
+        if (!PerformanceLogger::GetInstance().Initialize(logFile)) {
+            std::cerr << "Failed to initialize performance logger" << std::endl;
+            enableLogging = false;
+        } else {
+            std::cout << "Performance logging enabled to " << logFile << std::endl;
+        }
+    }
     
     // Setup signal handlers
     std::signal(SIGINT, signal_handler);
@@ -71,6 +100,15 @@ int main(int argc, char* argv[]) {
     if (!screenCapture.Initialize(monitorIndex)) {
         std::cerr << "Failed to initialize screen capture" << std::endl;
         return 1;
+    }
+    
+    // Configure buffering mode
+    if (bufferingMode == "single") {
+        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Single);
+    } else if (bufferingMode == "double") {
+        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Double);
+    } else if (bufferingMode == "triple") {
+        screenCapture.SetBufferingMode(ScreenCapture::BufferingMode::Triple);
     }
     
     // Get initial frame to determine dimensions
@@ -110,6 +148,17 @@ int main(int argc, char* argv[]) {
     QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&statsLastTime);
     unsigned frameCount = 0;
+    unsigned totalFrameCount = 0;
+    float lastEncoderFps = 0.0f;
+    int lastQueueSize = 0;
+    
+    // Register callback to get encoder stats
+    if (enableLogging) {
+        encoder.SetStatsCallback([&lastEncoderFps, &lastQueueSize](float fps, int queueSize) {
+            lastEncoderFps = fps;
+            lastQueueSize = queueSize;
+        });
+    }
     
     std::cout << "Starting capture loop..." << std::endl;
     
@@ -136,6 +185,7 @@ int main(int argc, char* argv[]) {
             
             // Update statistics
             frameCount++;
+            totalFrameCount++;
             
             // Print statistics every second
             LARGE_INTEGER currentTime;
@@ -144,7 +194,16 @@ int main(int argc, char* argv[]) {
             
             if (elapsed > frequency.QuadPart) {  // 1 second interval
                 float captureRate = (float)(frameCount * frequency.QuadPart) / elapsed;
-                std::cout << "Capture rate: " << captureRate << " fps, Capture FPS: " << screenCapture.GetFrameRate() << std::endl;
+                float captureFps = screenCapture.GetFrameRate();
+                
+                std::cout << "Capture rate: " << captureRate << " fps, Capture FPS: " << captureFps << std::endl;
+                
+                // Log performance data
+                if (enableLogging) {
+                    PerformanceLogger::GetInstance().LogPerformance("Capture", captureFps, totalFrameCount);
+                    PerformanceLogger::GetInstance().LogPerformance("Main Loop", captureRate, totalFrameCount);
+                    PerformanceLogger::GetInstance().LogPerformance("Encoder", lastEncoderFps, totalFrameCount, lastQueueSize);
+                }
                 
                 frameCount = 0;
                 statsLastTime = currentTime;
@@ -161,6 +220,11 @@ int main(int argc, char* argv[]) {
     }
     
     std::cout << "Shutting down..." << std::endl;
+    
+    // Shut down the performance logger
+    if (enableLogging) {
+        PerformanceLogger::GetInstance().Shutdown();
+    }
     
     // Clean up resources
     if (previewWindow) {

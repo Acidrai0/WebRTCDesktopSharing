@@ -10,6 +10,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/encoder.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/encoder.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/encoder.cpp.obj.d"
   "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/main.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj.d"
+  "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/performance_logger.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj.d"
   "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/preview_window.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj.d"
   "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/screen_capture.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj.d"
   "C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/webrtc_session.cpp" "client/CMakeFiles/desktop_sharing_client.dir/src/webrtc_session.cpp.obj" "gcc" "client/CMakeFiles/desktop_sharing_client.dir/src/webrtc_session.cpp.obj.d"

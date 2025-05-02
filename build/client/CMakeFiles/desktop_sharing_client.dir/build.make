@@ -146,13 +146,29 @@ client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.s: cmake_for
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.s"
 	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\client && C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\src\preview_window.cpp -o CMakeFiles\desktop_sharing_client.dir\src\preview_window.cpp.s
 
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj: client/CMakeFiles/desktop_sharing_client.dir/flags.make
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj: client/CMakeFiles/desktop_sharing_client.dir/includes_CXX.rsp
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj: C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/src/performance_logger.cpp
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj: client/CMakeFiles/desktop_sharing_client.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj"
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\client && C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj -MF CMakeFiles\desktop_sharing_client.dir\src\performance_logger.cpp.obj.d -o CMakeFiles\desktop_sharing_client.dir\src\performance_logger.cpp.obj -c C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\src\performance_logger.cpp
+
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.i"
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\client && C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\src\performance_logger.cpp > CMakeFiles\desktop_sharing_client.dir\src\performance_logger.cpp.i
+
+client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.s"
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\client && C:\msys64\mingw64\bin\c++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\src\performance_logger.cpp -o CMakeFiles\desktop_sharing_client.dir\src\performance_logger.cpp.s
+
 # Object files for target desktop_sharing_client
 desktop_sharing_client_OBJECTS = \
 "CMakeFiles/desktop_sharing_client.dir/src/main.cpp.obj" \
 "CMakeFiles/desktop_sharing_client.dir/src/screen_capture.cpp.obj" \
 "CMakeFiles/desktop_sharing_client.dir/src/encoder.cpp.obj" \
 "CMakeFiles/desktop_sharing_client.dir/src/webrtc_session.cpp.obj" \
-"CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj"
+"CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj" \
+"CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj"
 
 # External object files for target desktop_sharing_client
 desktop_sharing_client_EXTERNAL_OBJECTS =
@@ -162,12 +178,13 @@ C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_cl
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/src/encoder.cpp.obj
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/src/webrtc_session.cpp.obj
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj
+C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.obj
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/build.make
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/third_party/x264/build/lib/libx264.a
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/linkLibs.rsp
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/objects1.rsp
 C:/Users/arbazAhmed/Documents/WebRTCDesktopSharing/client/bin/desktop_sharing_client.exe: client/CMakeFiles/desktop_sharing_client.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX executable C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\bin\desktop_sharing_client.exe"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\client\bin\desktop_sharing_client.exe"
 	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build\client && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles\desktop_sharing_client.dir\link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

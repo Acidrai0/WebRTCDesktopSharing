@@ -36,7 +36,10 @@ private:
     ID3D11Device* m_d3dDevice = nullptr;
     ID3D11DeviceContext* m_d3dContext = nullptr;
     IDXGIOutputDuplication* m_dxgiOutputDuplication = nullptr;
-    ID3D11Texture2D* m_stagingTexture = nullptr;     // For CPU access to the frame
+    
+    // Double-buffered staging textures
+    ID3D11Texture2D* m_stagingTextures[2] = {nullptr, nullptr};
+    int m_currentTextureIndex = 0;
     ID3D11Texture2D* m_acquiredDesktopImage = nullptr; // Last acquired desktop image
     
     // DXGI cursor info
