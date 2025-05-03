@@ -24,77 +24,77 @@ void signal_handler(int signal) {
     g_running = false;
 }
 
-int main(int argc, char* argv[]) {
-    // Parse command line arguments
-    std::string signalingServer = "ws://localhost:8080";
-    int monitorIndex = 0;
-    int fps = 30;
-    int bitrate = 2000000;
-    bool showPreview = true;
-    float previewScale = 1.0f;  // Changed from 0.75f to 1.0f for pixel-perfect display
-    std::string logFile = "performance_double_buffered.csv";
-    bool enableLogging = false;
-    int benchmarkFrames = 0; // Number of frames to capture for benchmarking (0 = unlimited)
-    std::string testName = ""; // Test name for including in output filenames
-    std::string pipelineMode = "sequential"; // Default to sequential pipeline
-    bool useZeroCopy = true; // Default to zero-copy mode for better performance
+// Add a new command line option for the ring buffer system
+bool parseCommandLine(int argc, char* argv[], bool& showPreview, float& previewScale, 
+                      bool& fullscreen, bool& enableLogging, std::string& logFile, 
+                      std::string& testName, bool& noPreview, int& benchmarkFrames,
+                      bool& useRingBuffer) {
     
+    // Parse command line arguments
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "--signaling-server" && i + 1 < argc) {
-            signalingServer = argv[++i];
-        } else if (arg == "--monitor" && i + 1 < argc) {
-            monitorIndex = std::stoi(argv[++i]);
-        } else if (arg == "--fps" && i + 1 < argc) {
-            fps = std::stoi(argv[++i]);
-        } else if (arg == "--bitrate" && i + 1 < argc) {
-            bitrate = std::stoi(argv[++i]);
-        } else if (arg == "--pipeline-mode" && i + 1 < argc) {
-            pipelineMode = argv[++i];
-        } else if (arg == "--zero-copy" && i + 1 < argc) {
-            std::string value = argv[++i];
-            useZeroCopy = (value == "true" || value == "1");
-        } else if (arg == "--preview-window" && i + 1 < argc) {
-            std::string value = argv[++i];
-            showPreview = (value == "true");
-        } else if (arg == "--no-preview") {
-            showPreview = false;
-        } else if (arg == "--preview-scale" && i + 1 < argc) {
-            previewScale = std::stof(argv[++i]);
-        } else if (arg == "--log-file" && i + 1 < argc) {
-            logFile = argv[++i];
-            enableLogging = true;
-        } else if (arg == "--enable-logging") {
-            enableLogging = true;
-        } else if (arg == "--benchmark" && i + 1 < argc) {
-            benchmarkFrames = std::stoi(argv[++i]);
-        } else if (arg == "--output-csv" && i + 1 < argc) {
-            logFile = argv[++i];
-            enableLogging = true;
-        } else if (arg == "--test-name" && i + 1 < argc) {
-            testName = argv[++i];
-            std::cout << "Using test name: " << testName << std::endl;
-        } else if (arg == "--help") {
+        
+        if (arg == "--help" || arg == "-h") {
             std::cout << "Desktop Sharing Client" << std::endl;
             std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
             std::cout << "Options:" << std::endl;
-            std::cout << "  --signaling-server <url>  Signaling server URL (default: ws://localhost:8080)" << std::endl;
-            std::cout << "  --monitor <index>         Monitor index to capture (default: 0)" << std::endl;
-            std::cout << "  --fps <fps>               Target FPS (default: 30)" << std::endl;
-            std::cout << "  --bitrate <bitrate>       Target bitrate in bps (default: 2000000)" << std::endl;
-            std::cout << "  --pipeline-mode <mode>   Encoding pipeline mode: sequential or parallel (default: sequential)" << std::endl;
-            std::cout << "  --zero-copy <bool>        Enable or disable zero-copy mode (default: true)" << std::endl;
-            std::cout << "  --preview-window <bool>   Enable or disable preview window" << std::endl;
-            std::cout << "  --no-preview              Disable preview window" << std::endl;
-            std::cout << "  --preview-scale <scale>   Scale preview window (default: 1.0)" << std::endl;
-            std::cout << "  --enable-logging          Enable performance logging" << std::endl;
-            std::cout << "  --log-file <filename>     Log file name (default: performance_double_buffered.csv)" << std::endl;
-            std::cout << "  --benchmark <frames>      Run in benchmark mode for specified number of frames" << std::endl;
-            std::cout << "  --output-csv <filename>   Output CSV file for benchmark results" << std::endl;
-            std::cout << "  --test-name <name>        Test name to include in output H.264 files" << std::endl;
-            std::cout << "  --help                    Show this help message" << std::endl;
-            return 0;
+            std::cout << "  --no-preview             Disable preview window" << std::endl;
+            std::cout << "  --preview-scale <scale>  Set preview window scale (default: 0.75)" << std::endl;
+            std::cout << "  --fullscreen             Show preview window in fullscreen mode" << std::endl;
+            std::cout << "  --enable-logging         Enable performance logging" << std::endl;
+            std::cout << "  --log-file <filename>    Specify log file (default: perf_log.csv)" << std::endl;
+            std::cout << "  --test-name <name>       Add a test name to log file" << std::endl;
+            std::cout << "  --benchmark <frames>     Run benchmark mode for specified frames" << std::endl;
+            std::cout << "  --use-ring-buffer        Use ring buffer system (for testing)" << std::endl;
+            std::cout << "  --help, -h               Show this help message" << std::endl;
+            return false;
+        } else if (arg == "--no-preview") {
+            noPreview = true;
+            showPreview = false;
+        } else if (arg == "--preview-scale") {
+            if (i + 1 < argc) {
+                previewScale = std::stof(argv[++i]);
+            }
+        } else if (arg == "--fullscreen") {
+            fullscreen = true;
+        } else if (arg == "--enable-logging") {
+            enableLogging = true;
+        } else if (arg == "--log-file") {
+            if (i + 1 < argc) {
+                logFile = argv[++i];
+            }
+        } else if (arg == "--test-name") {
+            if (i + 1 < argc) {
+                testName = argv[++i];
+            }
+        } else if (arg == "--benchmark") {
+            if (i + 1 < argc) {
+                benchmarkFrames = std::stoi(argv[++i]);
+            }
+        } else if (arg == "--use-ring-buffer") {
+            useRingBuffer = true;
         }
+    }
+    
+    return true;
+}
+
+int main(int argc, char* argv[]) {
+    // Default settings
+    bool showPreview = true;
+    float previewScale = 1.0f;  // Changed from 0.75f to 1.0f for pixel-perfect display
+    bool fullscreen = false;
+    bool enableLogging = false;
+    std::string logFile = "perf_log.csv";
+    std::string testName = "";
+    bool noPreview = false;
+    int benchmarkFrames = 0;
+    bool useRingBuffer = false;  // Default to original queue system
+    
+    // Parse command line
+    if (!parseCommandLine(argc, argv, showPreview, previewScale, fullscreen, enableLogging,
+                         logFile, testName, noPreview, benchmarkFrames, useRingBuffer)) {
+        return 0;
     }
     
     std::cout << "Starting desktop sharing client" << std::endl;
@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
     
     // Initialize screen capture
     ScreenCapture screenCapture;
-    if (!screenCapture.Initialize(monitorIndex)) {
+    if (!screenCapture.Initialize(0)) {
         std::cerr << "Failed to initialize screen capture" << std::endl;
         return 1;
     }
@@ -132,24 +132,18 @@ int main(int argc, char* argv[]) {
     
     std::cout << "Captured screen with dimensions: " << width << "x" << height << std::endl;
     
-    // Initialize encoder (which now handles frame rate control in a separate thread)
+    // Configure encoder
     Encoder encoder;
-    if (!encoder.Initialize(width, height, fps, bitrate, testName)) {
-        std::cerr << "Failed to initialize encoder" << std::endl;
-        return 1;
+    encoder.SetPipelineMode(EncoderPipelineMode::Parallel);
+    
+    // Set buffer system mode based on command line
+    if (useRingBuffer) {
+        encoder.SetBufferSystemMode(BufferSystemMode::RingBuffer);
+        std::cout << "Using ring buffer system for improved timing control" << std::endl;
     }
     
-    // Set pipeline mode if specified
-    if (pipelineMode == "parallel") {
-        std::cout << "Using parallel encoding pipeline" << std::endl;
-        encoder.SetPipelineMode(EncoderPipelineMode::Parallel);
-    } else {
-        std::cout << "Using sequential encoding pipeline" << std::endl;
-        encoder.SetPipelineMode(EncoderPipelineMode::Sequential);
-    }
-    
-    // Display zero-copy mode
-    std::cout << "Zero-copy mode: " << (useZeroCopy ? "enabled" : "disabled") << std::endl;
+    // Rest of initialization
+    encoder.Initialize(width, height, 30, 5000, testName);
     
     // Initialize preview window if enabled
 #ifndef NO_PREVIEW_WINDOW
@@ -215,7 +209,7 @@ int main(int argc, char* argv[]) {
 #endif
                 
                 // Use zero-copy or regular encoding based on configuration
-                if (useZeroCopy) {
+                if (useRingBuffer) {
                     // Create a shared pointer to the frame buffer
                     auto sharedFrame = std::make_shared<std::vector<uint8_t>>(frameBuffer);
                     

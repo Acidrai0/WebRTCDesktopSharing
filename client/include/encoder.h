@@ -15,6 +15,10 @@
 #include <string>
 #include <deque>
 
+// New components
+#include "ring_buffer.h"
+#include "global_clock.h"
+
 // Forward declarations
 class YuvConverter;
 
@@ -45,9 +49,15 @@ struct EncoderFrame {
     int vStride = 0;
     bool yuvConverted = false;
     
+    // For consistent with VideoFrame
+    std::shared_ptr<std::vector<uint8_t>> yuvData;
+    
     // Track if this frame is from the pool
     bool fromPool = false;
     int poolIndex = -1;
+    
+    // For timing control
+    bool isKeyFrame = false;
     
     void Reset() {
         // Reset the frame but don't deallocate memory
@@ -66,6 +76,7 @@ struct EncoderFrame {
         uStride = 0;
         vStride = 0;
         yuvConverted = false;
+        isKeyFrame = false;
     }
 };
 
@@ -142,6 +153,12 @@ enum class EncoderPipelineMode {
     Parallel       // Parallel pipeline with separate conversion and encoding threads
 };
 
+// Buffer system modes
+enum class BufferSystemMode {
+    Queue,         // Original unbounded queue
+    RingBuffer     // Fixed-size ring buffer with timing control
+};
+
 class Encoder {
 public:
     Encoder();
@@ -152,6 +169,9 @@ public:
     
     // Configure the pipeline mode
     void SetPipelineMode(EncoderPipelineMode mode);
+    
+    // Configure the buffer system mode
+    void SetBufferSystemMode(BufferSystemMode mode);
     
     // New method for queueing frames for threaded encoding
     bool EncodeFrame(const std::vector<uint8_t>& bgraFrame, int width, int height);
@@ -228,12 +248,15 @@ private:
     // Pipeline mode
     EncoderPipelineMode m_pipelineMode = EncoderPipelineMode::Sequential;
     
+    // Buffer system mode
+    BufferSystemMode m_bufferMode = BufferSystemMode::Queue;
+    
     // Thread synchronization for parallel pipeline
     std::thread m_preprocessThread;
     std::thread m_encodingThread;
     std::atomic<bool> m_running{false};
     
-    // Frame queues for pipeline stages
+    // Original queue-based system
     std::queue<EncoderFrame*> m_rawFrameQueue;    // Raw BGRA frames (pointers for zero-copy)
     std::queue<EncoderFrame*> m_yuvFrameQueue;    // YUV-converted frames (pointers for zero-copy)
     
@@ -247,6 +270,12 @@ private:
     std::mutex m_queueMutex;
     std::condition_variable m_queueCV;
     std::queue<EncoderFrame> m_frameQueue;
+    
+    // Ring buffer system components
+    std::unique_ptr<RingBuffer<std::shared_ptr<EncoderFrame>>> m_rawFrameBuffer;
+    std::unique_ptr<RingBuffer<std::shared_ptr<EncoderFrame>>> m_yuvFrameBuffer;
+    std::mutex m_frameMutex;
+    GlobalClock m_clock;
     
     // Callback for encoded data
     EncodedFrameCallback m_callback;

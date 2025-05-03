@@ -61,6 +61,18 @@ void Encoder::SetPipelineMode(EncoderPipelineMode mode) {
     }
 }
 
+void Encoder::SetBufferSystemMode(BufferSystemMode mode) {
+    // Only allow changing mode when not running
+    if (!m_running) {
+        m_bufferMode = mode;
+        std::cout << "Encoder buffer system mode set to: " 
+                  << (mode == BufferSystemMode::Queue ? "Queue" : "RingBuffer") 
+                  << std::endl;
+    } else {
+        std::cerr << "Cannot change buffer system mode while encoder is running" << std::endl;
+    }
+}
+
 bool Encoder::Initialize(int width, int height, int fps, int bitrate, const std::string& testName) {
     m_width = width;
     m_height = height;
@@ -70,6 +82,25 @@ bool Encoder::Initialize(int width, int height, int fps, int bitrate, const std:
     
     // Initialize timing buffer for smooth frame rate
     InitializeTimingBuffer(fps);
+    
+    // Initialize the clock if using ring buffer
+    if (m_bufferMode == BufferSystemMode::RingBuffer) {
+        m_clock = GlobalClock(fps);
+        
+        // Set ring buffer capacities based on FPS
+        // Capture buffer: 2 seconds of frames
+        int captureCapacity = fps * 2;
+        // Encode buffer: 1 second of frames
+        int encodeCapacity = fps;
+        
+        // Initialize ring buffers with appropriate capacities
+        m_rawFrameBuffer = std::make_unique<RingBuffer<std::shared_ptr<EncoderFrame>>>(captureCapacity);
+        m_yuvFrameBuffer = std::make_unique<RingBuffer<std::shared_ptr<EncoderFrame>>>(encodeCapacity);
+        
+        std::cout << "Initialized ring buffers with " 
+                  << captureCapacity << " frames capture capacity and "
+                  << encodeCapacity << " frames encode capacity" << std::endl;
+    }
     
     // Configure x264 parameters
     x264_param_t param;
@@ -221,7 +252,24 @@ bool Encoder::EncodeFrameZeroCopy(const std::shared_ptr<std::vector<uint8_t>>& b
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()).count();
     
-    if (m_pipelineMode == EncoderPipelineMode::Parallel) {
+    if (m_bufferMode == BufferSystemMode::RingBuffer) {
+        // Using ring buffer system
+        auto frame = std::make_shared<EncoderFrame>();
+        frame->sharedData = bgraFrame;
+        frame->width = width;
+        frame->height = height;
+        frame->timestamp = timestamp;
+        frame->qpcTimestamp = qpcTimestamp.QuadPart;
+        
+        // Push to ring buffer with non-blocking mode to avoid stalling the capture thread
+        if (!m_rawFrameBuffer->push(frame, false)) {
+            // Buffer full - frame dropped
+            std::cout << "WARNING: Capture buffer full, frame dropped" << std::endl;
+        }
+        
+        return true;
+    }
+    else if (m_pipelineMode == EncoderPipelineMode::Parallel) {
         // Get a frame from the pool
         EncoderFrame* frame = m_framePool.GetFrame();
         
@@ -362,109 +410,159 @@ void Encoder::PreprocessThreadFunc() {
     const size_t PREFETCH_SIZE = 64; // Typical cache line size
     
     while (m_running) {
-        EncoderFrame* frame = nullptr;
-        bool hasFrame = false;
-        
-        // Get a frame from the raw queue
-        {
-            std::unique_lock<std::mutex> lock(m_rawQueueMutex);
-            
-            // Wait for a frame or shutdown signal with a timeout to prevent deadlocks
-            auto waitResult = m_rawQueueCV.wait_for(lock, std::chrono::milliseconds(100), [this] {
-                return !m_rawFrameQueue.empty() || !m_running;
-            });
-            
-            // Check if we should exit
-            if (!m_running && m_rawFrameQueue.empty()) {
-                break;
-            }
-            
-            // Get next frame
-            if (!m_rawFrameQueue.empty()) {
-                frame = m_rawFrameQueue.front();
-                m_rawFrameQueue.pop();
-                hasFrame = true;
-            }
-        }
-        
-        // Process the frame if we have one
-        if (hasFrame && frame) {
-            // Start timing conversion
-            QueryPerformanceCounter(&conversionStart);
-            
-            // Prefetch first few bytes of frame data to improve cache locality
-            if (frame->sharedData && frame->sharedData->size() > 0) {
-                _mm_prefetch(reinterpret_cast<const char*>(frame->sharedData->data()), _MM_HINT_T0);
-                if (frame->sharedData->size() > PREFETCH_SIZE) {
-                    _mm_prefetch(reinterpret_cast<const char*>(frame->sharedData->data() + PREFETCH_SIZE), _MM_HINT_T0);
-                }
-            } else if (!frame->data.empty()) {
-                _mm_prefetch(reinterpret_cast<const char*>(frame->data.data()), _MM_HINT_T0);
-                if (frame->data.size() > PREFETCH_SIZE) {
-                    _mm_prefetch(reinterpret_cast<const char*>(frame->data.data() + PREFETCH_SIZE), _MM_HINT_T0);
-                }
-            }
-            
-            // Convert BGRA to YUV
-            bool success = false;
-            if (frame->sharedData) {
-                success = ConvertBGRAtoYUV(frame->sharedData, *frame);
-            } else {
-                success = ConvertBGRAtoYUV(frame->data, *frame);
-            }
-            
-            // End timing conversion
-            QueryPerformanceCounter(&conversionEnd);
-            double conversionTime = static_cast<double>(conversionEnd.QuadPart - conversionStart.QuadPart) / 
-                                  static_cast<double>(m_frequency.QuadPart);
-            totalConversionTime += conversionTime;
-            
-            if (success) {
-                // Calculate frame latency from capture to conversion completion
-                double frameLatency = static_cast<double>(conversionEnd.QuadPart - frame->qpcTimestamp) / 
-                                     static_cast<double>(m_frequency.QuadPart) * 1000.0; // in ms
+        if (m_bufferMode == BufferSystemMode::RingBuffer) {
+            // Ring buffer implementation
+            std::shared_ptr<EncoderFrame> frame;
+            if (m_rawFrameBuffer->pop(frame, true)) {
+                // Start timing conversion
+                QueryPerformanceCounter(&conversionStart);
                 
-                // Add converted frame to YUV queue
-                {
-                    std::lock_guard<std::mutex> lock(m_yuvQueueMutex);
-                    m_yuvFrameQueue.push(frame);
+                // Convert BGRA to YUV
+                bool success = false;
+                if (frame->sharedData) {
+                    // Create a temporary local EncoderFrame for conversion
+                    EncoderFrame localFrame;
+                    localFrame.width = frame->width;
+                    localFrame.height = frame->height;
                     
-                    // Monitor queue size for potential bottlenecks
-                    if (m_yuvFrameQueue.size() > 5) {
-                        std::cout << "Warning: YUV queue growing: " << m_yuvFrameQueue.size() 
-                                  << " frames, conversion time: " << (conversionTime * 1000.0) << " ms" << std::endl;
+                    // Convert using the YUV converter
+                    success = ConvertBGRAtoYUV(frame->sharedData, localFrame);
+                    
+                    if (success) {
+                        // Transfer the YUV data to the shared frame
+                        frame->yPlane = localFrame.yPlane;
+                        frame->uPlane = localFrame.uPlane;
+                        frame->vPlane = localFrame.vPlane;
+                        frame->yStride = localFrame.yStride;
+                        frame->uStride = localFrame.uStride;
+                        frame->vStride = localFrame.vStride;
+                        frame->yuvConverted = true;
                     }
                 }
                 
-                // Notify encoding thread
-                m_yuvQueueCV.notify_one();
+                // End timing conversion
+                QueryPerformanceCounter(&conversionEnd);
+                double conversionTime = static_cast<double>(conversionEnd.QuadPart - conversionStart.QuadPart) / 
+                                      static_cast<double>(m_frequency.QuadPart);
+                totalConversionTime += conversionTime;
                 
-                // Update stats
-                framesConverted++;
-            } else {
-                // Release the frame back to the pool on error
-                m_framePool.ReleaseFrame(frame);
-                std::cerr << "Failed to convert frame to YUV" << std::endl;
-            }
-            
-            // Update conversion rate stats periodically
-            LARGE_INTEGER currentTime;
-            QueryPerformanceCounter(&currentTime);
-            double elapsedSeconds = static_cast<double>(currentTime.QuadPart - lastConversionStatsTime.QuadPart) 
-                                  / static_cast<double>(m_frequency.QuadPart);
-            
-            if (elapsedSeconds >= 1.0) {
-                m_pipelineStats.conversionRate = static_cast<float>(framesConverted) / static_cast<float>(elapsedSeconds);
-                
-                if (framesConverted > 0) {
-                    double avgConversionTime = totalConversionTime / framesConverted * 1000.0; // in ms
-                    std::cout << "YUV conversion: " << m_pipelineStats.conversionRate << " fps, avg time: " 
-                              << avgConversionTime << " ms" << std::endl;
+                if (success) {
+                    // Push to YUV buffer for encoding
+                    if (!m_yuvFrameBuffer->push(frame, false)) {
+                        // Buffer full - frame dropped
+                        std::cout << "WARNING: YUV buffer full, frame dropped" << std::endl;
+                    }
+                    
+                    framesConverted++;
                 }
                 
-                framesConverted = 0;
-                totalConversionTime = 0.0;
-                lastConversionStatsTime = currentTime;
+                // Update conversion rate stats periodically
+                LARGE_INTEGER currentTime;
+                QueryPerformanceCounter(&currentTime);
+                double elapsedSeconds = static_cast<double>(currentTime.QuadPart - lastConversionStatsTime.QuadPart) 
+                                      / static_cast<double>(m_frequency.QuadPart);
+                
+                if (elapsedSeconds >= 1.0) {
+                    m_pipelineStats.conversionRate = static_cast<float>(framesConverted) / static_cast<float>(elapsedSeconds);
+                    
+                    if (framesConverted > 0) {
+                        double avgConversionTime = totalConversionTime / framesConverted * 1000.0; // in ms
+                        std::cout << "YUV conversion: " << m_pipelineStats.conversionRate << " fps, avg time: " 
+                                  << avgConversionTime << " ms" << std::endl;
+                    }
+                    
+                    framesConverted = 0;
+                    totalConversionTime = 0.0;
+                    lastConversionStatsTime = currentTime;
+                }
+            }
+        }
+        else {
+            // Original queue-based implementation
+            EncoderFrame* frame = nullptr;
+            bool frameAvailable = false;
+            
+            // Get a frame from the raw queue
+            {
+                std::unique_lock<std::mutex> lock(m_rawQueueMutex);
+                
+                // Wait for a frame or shutdown signal with a timeout to prevent deadlocks
+                auto waitResult = m_rawQueueCV.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                    return !m_rawFrameQueue.empty() || !m_running;
+                });
+                
+                // Check if we should exit
+                if (!m_running && m_rawFrameQueue.empty()) {
+                    break;
+                }
+                
+                // Get next frame
+                if (!m_rawFrameQueue.empty()) {
+                    frame = m_rawFrameQueue.front();
+                    m_rawFrameQueue.pop();
+                    frameAvailable = true;
+                }
+            }
+            
+            // Process the frame if we have one
+            if (frameAvailable && frame) {
+                // Start timing conversion
+                QueryPerformanceCounter(&conversionStart);
+                
+                // Prefetch first few bytes of frame data to improve cache locality
+                if (frame->sharedData && frame->sharedData->size() > 0) {
+                    _mm_prefetch(reinterpret_cast<const char*>(frame->sharedData->data()), _MM_HINT_T0);
+                    if (frame->sharedData->size() > PREFETCH_SIZE) {
+                        _mm_prefetch(reinterpret_cast<const char*>(frame->sharedData->data() + PREFETCH_SIZE), _MM_HINT_T0);
+                    }
+                } else if (!frame->data.empty()) {
+                    _mm_prefetch(reinterpret_cast<const char*>(frame->data.data()), _MM_HINT_T0);
+                    if (frame->data.size() > PREFETCH_SIZE) {
+                        _mm_prefetch(reinterpret_cast<const char*>(frame->data.data() + PREFETCH_SIZE), _MM_HINT_T0);
+                    }
+                }
+                
+                // Convert BGRA to YUV
+                bool success = false;
+                if (frame->sharedData) {
+                    success = ConvertBGRAtoYUV(*frame->sharedData, *frame);
+                } else {
+                    success = ConvertBGRAtoYUV(frame->data, *frame);
+                }
+                
+                // End timing conversion
+                QueryPerformanceCounter(&conversionEnd);
+                double conversionTime = static_cast<double>(conversionEnd.QuadPart - conversionStart.QuadPart) / 
+                                      static_cast<double>(m_frequency.QuadPart);
+                totalConversionTime += conversionTime;
+                
+                if (success) {
+                    // Calculate frame latency from capture to conversion completion
+                    double frameLatency = static_cast<double>(conversionEnd.QuadPart - frame->qpcTimestamp) / 
+                                         static_cast<double>(m_frequency.QuadPart) * 1000.0; // in ms
+                    
+                    // Add converted frame to YUV queue
+                    {
+                        std::lock_guard<std::mutex> lock(m_yuvQueueMutex);
+                        m_yuvFrameQueue.push(frame);
+                        
+                        // Monitor queue size for potential bottlenecks
+                        if (m_yuvFrameQueue.size() > 5) {
+                            std::cout << "Warning: YUV queue growing: " << m_yuvFrameQueue.size() 
+                                      << " frames, conversion time: " << (conversionTime * 1000.0) << " ms" << std::endl;
+                        }
+                    }
+                    
+                    // Notify encoding thread
+                    m_yuvQueueCV.notify_one();
+                    
+                    // Update stats
+                    framesConverted++;
+                } else {
+                    // Release the frame back to the pool on error
+                    m_framePool.ReleaseFrame(frame);
+                    std::cerr << "Failed to convert frame to YUV" << std::endl;
+                }
             }
         }
     }
@@ -497,49 +595,166 @@ void Encoder::EncodingThreadFunc() {
     double averageLatency = 0.0;
     double maxLatency = 0.0;
     
+    // Frame duplication for ring buffer
+    std::shared_ptr<EncoderFrame> lastFrame;
+    int nextFrameNumber = 0;
+    
     while (m_running) {
-        bool hasFrame = false;
-        
-        if (m_pipelineMode == EncoderPipelineMode::Parallel) {
-            // Get a frame from the YUV queue
+        if (m_bufferMode == BufferSystemMode::RingBuffer) {
+            // Ring buffer implementation with fixed timing
+            
+            // Calculate time until next frame should be processed
+            int delay = m_clock.calculateDelay(nextFrameNumber);
+            
+            if (delay > 0) {
+                // We're ahead of schedule, wait
+                std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            }
+            
+            // Try to get a frame from the YUV buffer (non-blocking)
+            std::shared_ptr<EncoderFrame> frame;
+            bool hasFrame = m_yuvFrameBuffer->pop(frame, false);
+            
+            if (hasFrame) {
+                // Start timing encoding
+                QueryPerformanceCounter(&encodingStart);
+                
+                // Set frame's presentation timestamp based on frame number
+                double pts = m_clock.frameToPts(nextFrameNumber);
+                
+                // Update x264 picture planes with YUV data
+                m_picIn.img.plane[0] = frame->yPlane;
+                m_picIn.img.plane[1] = frame->uPlane;
+                m_picIn.img.plane[2] = frame->vPlane;
+                m_picIn.img.i_stride[0] = frame->yStride;
+                m_picIn.img.i_stride[1] = frame->uStride;
+                m_picIn.img.i_stride[2] = frame->vStride;
+                
+                // Set PTS based on the frame number for consistent timing
+                m_picIn.i_pts = nextFrameNumber;
+                m_picIn.i_dts = m_picIn.i_pts;
+                
+                // Encode the frame
+                x264_nal_t* nals;
+                int i_nals;
+                int frameSize = x264_encoder_encode(m_encoder, &nals, &i_nals, &m_picIn, &m_picOut);
+                
+                if (frameSize > 0) {
+                    // Track if this is a keyframe
+                    frame->isKeyFrame = m_picOut.b_keyframe != 0;
+                    
+                    // Write to file and call callback
+                    if (m_outputFile.is_open()) {
+                        m_outputFile.write(reinterpret_cast<char*>(nals[0].p_payload), frameSize);
+                    }
+                    
+                    // Call callback if registered
+                    if (m_callback) {
+                        m_callback(nals[0].p_payload, frameSize, frame->isKeyFrame);
+                    }
+                    
+                    // Update stats
+                    m_encodedBytes += frameSize;
+                    framesEncoded++;
+                }
+                
+                // End encoding timing
+                QueryPerformanceCounter(&encodingEnd);
+                double encodingTime = static_cast<double>(encodingEnd.QuadPart - encodingStart.QuadPart) /
+                                     static_cast<double>(m_frequency.QuadPart);
+                
+                totalEncodingTime += encodingTime;
+                maxEncodingTime = std::max(maxEncodingTime, encodingTime);
+                minEncodingTime = std::min(minEncodingTime, encodingTime);
+                
+                // Store as last frame for frame duplication if needed
+                lastFrame = frame;
+            }
+            else if (lastFrame) {
+                // No new frame available, duplicate the last one
+                // Start timing encoding
+                QueryPerformanceCounter(&encodingStart);
+                
+                // Use the last frame's YUV data
+                m_picIn.img.plane[0] = lastFrame->yPlane;
+                m_picIn.img.plane[1] = lastFrame->uPlane;
+                m_picIn.img.plane[2] = lastFrame->vPlane;
+                m_picIn.img.i_stride[0] = lastFrame->yStride;
+                m_picIn.img.i_stride[1] = lastFrame->uStride;
+                m_picIn.img.i_stride[2] = lastFrame->vStride;
+                
+                // Set PTS based on the frame number for consistent timing
+                m_picIn.i_pts = nextFrameNumber;
+                m_picIn.i_dts = m_picIn.i_pts;
+                
+                // Encode the frame
+                x264_nal_t* nals;
+                int i_nals;
+                int frameSize = x264_encoder_encode(m_encoder, &nals, &i_nals, &m_picIn, &m_picOut);
+                
+                if (frameSize > 0) {
+                    // Write to file and call callback
+                    if (m_outputFile.is_open()) {
+                        m_outputFile.write(reinterpret_cast<char*>(nals[0].p_payload), frameSize);
+                    }
+                    
+                    // Call callback if registered
+                    if (m_callback) {
+                        bool isKeyFrame = m_picOut.b_keyframe != 0;
+                        m_callback(nals[0].p_payload, frameSize, isKeyFrame);
+                    }
+                    
+                    // Update stats
+                    m_encodedBytes += frameSize;
+                    framesEncoded++;
+                    
+                    std::cout << "Duplicated frame for smooth playback" << std::endl;
+                }
+                
+                // End encoding timing
+                QueryPerformanceCounter(&encodingEnd);
+                double encodingTime = static_cast<double>(encodingEnd.QuadPart - encodingStart.QuadPart) /
+                                     static_cast<double>(m_frequency.QuadPart);
+                
+                totalEncodingTime += encodingTime;
+            }
+            else {
+                // No frames at all yet
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            
+            // Increment frame number for next frame
+            nextFrameNumber++;
+        }
+        else if (m_pipelineMode == EncoderPipelineMode::Parallel) {
+            // Original queue-based implementation with parallel pipeline
             EncoderFrame* frame = nullptr;
+            bool frameAvailable = false;
             
             {
                 std::unique_lock<std::mutex> lock(m_yuvQueueMutex);
                 
+                // Wait for a frame or shutdown signal with timeout
+                auto waitResult = m_yuvQueueCV.wait_for(lock, std::chrono::milliseconds(5), [this] {
+                    return !m_yuvFrameQueue.empty() || !m_running;
+                });
+                
+                // Check if we should exit
+                if (!m_running && m_yuvFrameQueue.empty()) {
+                    break;
+                }
+                
+                // Get next frame
                 if (!m_yuvFrameQueue.empty()) {
-                    // Check if it's time to process the next frame
                     frame = m_yuvFrameQueue.front();
-                    
-                    if (ShouldReleaseFrame(frame)) {
-                        // Dequeue the frame
-                        m_yuvFrameQueue.pop();
-                        hasFrame = true;
-                        
-                        // Update timing buffer
-                        UpdateTimingBuffer();
-                    } else {
-                        // Not time to process yet, wait a bit
-                        frame = nullptr;
-                        lock.unlock();
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                        continue;
-                    }
-                } else {
-                    // No frames available, wait for notification
-                    auto waitResult = m_yuvQueueCV.wait_for(lock, std::chrono::milliseconds(5), [this] {
-                        return !m_yuvFrameQueue.empty() || !m_running;
-                    });
-                    
-                    // Check if we should exit
-                    if (!m_running && m_yuvFrameQueue.empty()) {
-                        break;
-                    }
+                    m_yuvFrameQueue.pop();
+                    frameAvailable = true;
                 }
             }
             
             // Process the frame if we have one
-            if (hasFrame && frame) {
+            if (frameAvailable && frame) {
                 // Start timing encoding
                 QueryPerformanceCounter(&encodingStart);
                 
@@ -628,7 +843,7 @@ void Encoder::EncodingThreadFunc() {
                 }
             }
         } else {
-            // Original sequential path - get from main queue
+            // Original queue-based implementation with sequential pipeline
             EncoderFrame frame;
             bool shouldProcess = false;
             
@@ -641,7 +856,6 @@ void Encoder::EncodingThreadFunc() {
                         // Dequeue the frame
                         frame = m_frameQueue.front();
                         m_frameQueue.pop();
-                        hasFrame = true;
                         shouldProcess = true;
                         
                         // Update timing buffer
@@ -666,7 +880,7 @@ void Encoder::EncodingThreadFunc() {
             }
             
             // Process the frame if we have one
-            if (hasFrame && shouldProcess) {
+            if (shouldProcess) {
                 // For latency calculation
                 auto now = std::chrono::high_resolution_clock::now();
                 auto currentTimestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -758,6 +972,7 @@ void Encoder::EncodingThreadFunc() {
 
 // Add conversion method for shared_ptr version
 bool Encoder::ConvertBGRAtoYUV(const std::shared_ptr<std::vector<uint8_t>>& bgraFrame, EncoderFrame& frame) {
+    // Check shared frame size
     if (!bgraFrame || bgraFrame->size() < frame.width * frame.height * 4) {
         std::cerr << "Input frame too small for resolution: " 
                   << (bgraFrame ? bgraFrame->size() : 0) << " vs " << (frame.width * frame.height * 4) << std::endl;
