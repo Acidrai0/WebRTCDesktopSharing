@@ -9,12 +9,20 @@
 
 class ScreenCapture {
 public:
+    // Buffering mode enum
+    enum class BufferingMode {
+        Double
+    };
+
     ScreenCapture();
     ~ScreenCapture();
 
     bool Initialize(int monitorIndex = 0);
     bool CaptureFrame(std::vector<uint8_t>& outputBuffer, int& width, int& height);
     float GetFrameRate() const;
+    
+    // Set the buffering mode (double)
+    void SetBufferingMode(BufferingMode mode);
     
 private:
     bool InitializeDXGI();
@@ -31,6 +39,14 @@ private:
                         const POINT& position);
     void DrawCursorPixel(std::vector<uint8_t>& frameData, int frameWidth, int frameHeight, 
                         int x, int y, int bytesPerPixel, uint8_t r, uint8_t g, uint8_t b);
+    
+    // Memory alignment and buffer management
+    size_t GetAlignedSize(size_t size) const;
+    uint8_t* AlignBuffer(std::vector<uint8_t>& buffer, size_t requiredSize);
+    void ManageBufferPool(std::vector<uint8_t>& usedBuffer, int width, int height);
+    
+    // Optimized memory copy function
+    void OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, int width, int height, LONG srcStride);
     
     // DXGI components
     ID3D11Device* m_d3dDevice = nullptr;
@@ -66,6 +82,19 @@ private:
     LARGE_INTEGER m_lastCaptureTime = {0};
     int m_frameCount = 0;
     float m_framerate = 0.0f;
+    
+    // Buffering mode
+    BufferingMode m_bufferingMode;
+    
+    // Memory alignment
+    size_t m_alignedBufferPadding;
+    
+    // Buffer pooling
+    std::vector<std::vector<uint8_t>> m_bufferPool;
+    int m_lastWidth;
+    int m_lastHeight;
+    double m_unusedTime;
+    LARGE_INTEGER m_lastUnusedCheck = {0};
     
     // Resource clean-up methods
     void CleanupDXGI();

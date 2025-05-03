@@ -38,6 +38,7 @@ private:
     // Memory alignment helpers
     size_t GetAlignedSize(size_t size) const;
     uint8_t* AlignBuffer(std::vector<uint8_t>& buffer, size_t requiredSize);
+    void ManageBufferPool(std::vector<uint8_t>& usedBuffer, int width, int height);
     
     // Optimized memory copy functions
     void OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, 
@@ -54,39 +55,46 @@ private:
                         int x, int y, int bytesPerPixel, uint8_t r, uint8_t g, uint8_t b);
     
     // DXGI related members
-    ID3D11Device* m_d3dDevice;
-    ID3D11DeviceContext* m_d3dContext;
-    IDXGIOutputDuplication* m_dxgiOutputDuplication;
-    ID3D11Texture2D* m_acquiredDesktopImage;
-    ID3D11Texture2D* m_stagingTextures[2]; // Double buffering only
-    int m_currentTextureIndex;
+    ID3D11Device* m_d3dDevice = nullptr;
+    ID3D11DeviceContext* m_d3dContext = nullptr;
+    IDXGIOutputDuplication* m_dxgiOutputDuplication = nullptr;
+    ID3D11Texture2D* m_acquiredDesktopImage = nullptr;
+    ID3D11Texture2D* m_stagingTextures[2] = {nullptr, nullptr}; // Double buffering only
+    int m_currentTextureIndex = 0;
     BufferingMode m_bufferingMode;         // Current buffering mode
     
     // Memory alignment related members
     size_t m_alignedBufferPadding;         // Extra padding for alignment
     
+    // Buffer pooling
+    std::vector<std::vector<uint8_t>> m_bufferPool;
+    int m_lastWidth = 0;
+    int m_lastHeight = 0;
+    double m_unusedTime = 0;
+    LARGE_INTEGER m_lastUnusedCheck = {0};
+    
     // GDI related members
-    HDC m_hdcScreen;
-    HDC m_hdcMemory;
-    HBITMAP m_hBitmap;
+    HDC m_hdcScreen = nullptr;
+    HDC m_hdcMemory = nullptr;
+    HBITMAP m_hBitmap = nullptr;
     
     // Monitor information
-    int m_monitorIndex;
-    int m_monitorWidth;
-    int m_monitorHeight;
-    RECT m_monitorRect;
+    int m_monitorIndex = 0;
+    int m_monitorWidth = 0;
+    int m_monitorHeight = 0;
+    RECT m_monitorRect = {0};
     
     // Cursor information
-    bool m_captureCursor;
-    bool m_cursorVisible;
-    POINT m_cursorPosition;
-    LARGE_INTEGER m_lastCursorUpdateTime;
+    bool m_captureCursor = true;
+    bool m_cursorVisible = false;
+    POINT m_cursorPosition = {0, 0};
+    LARGE_INTEGER m_lastCursorUpdateTime = {0};
     
     // Performance tracking
-    LARGE_INTEGER m_lastCaptureTime;
-    unsigned int m_frameCount;
-    float m_framerate;
+    LARGE_INTEGER m_lastCaptureTime = {0};
+    unsigned int m_frameCount = 0;
+    float m_framerate = 0.0f;
     
     // Capture flags
-    bool m_usingDXGI;
+    bool m_usingDXGI = true;
 }; 

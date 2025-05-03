@@ -1,8 +1,11 @@
 #include "screen_capture.h"
+#include "simd_mem_utils.h" // Include our SIMD utilities
+#include "xsimd_mem_utils.h" // Include our xsimd utilities
 
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <algorithm> // For std::min_element and std::max_element
 
 ScreenCapture::ScreenCapture() {
     m_usingDXGI = true;
@@ -17,6 +20,12 @@ ScreenCapture::ScreenCapture() {
     m_bufferingMode = BufferingMode::Double; // Using double buffering
     m_alignedBufferPadding = MEMORY_ALIGNMENT; // Set default padding for alignment
     
+    // Initialize buffer pool
+    m_lastWidth = 0;
+    m_lastHeight = 0;
+    m_unusedTime = 0;
+    m_lastUnusedCheck.QuadPart = 0;
+    
     // Initialize cursor position
     GetCursorPos(&m_cursorPosition);
     
@@ -27,11 +36,25 @@ ScreenCapture::ScreenCapture() {
     
     // Initialize cursor update time
     m_lastCursorUpdateTime = m_lastCaptureTime;
+    
+    // Initialize SIMD utilities - this is now the default implementation
+    SimdMemUtils::Initialize();
+    
+    // Also initialize xsimd utilities in case we need them later
+    XSimdMemUtils::Initialize();
+    
+    std::cout << "Screen capture initialized using SIMD optimizations by default" << std::endl;
 }
 
 ScreenCapture::~ScreenCapture() {
     CleanupDXGI();
     CleanupGDI();
+    
+    // Clean up buffer pool
+    for (auto& buffer : m_bufferPool) {
+        buffer.clear();
+    }
+    m_bufferPool.clear();
 }
 
 bool ScreenCapture::Initialize(int monitorIndex) {
@@ -160,18 +183,39 @@ bool ScreenCapture::InitializeDXGI() {
 
 bool ScreenCapture::FallbackToGDI() {
     try {
-        // Get primary monitor info (for multi-monitor support, we would need to use EnumDisplayMonitors)
+        std::cout << "Initializing GDI screen capture for monitor " << m_monitorIndex << std::endl;
+        
+        // Count monitors for better error messages
+        int monitorCount = GetSystemMetrics(SM_CMONITORS);
+        std::cout << "System has " << monitorCount << " monitor(s)" << std::endl;
+        
+        if (m_monitorIndex >= monitorCount) {
+            std::cerr << "Monitor index " << m_monitorIndex << " is out of range, defaulting to primary monitor" << std::endl;
+            m_monitorIndex = 0;
+        }
+        
+        // Get monitor info
         MONITORINFO monitorInfo = {0};
         monitorInfo.cbSize = sizeof(MONITORINFO);
+        HMONITOR targetMonitor = nullptr;
         
         if (m_monitorIndex == 0) {
             // Primary monitor
-            if (!GetMonitorInfo(MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY), &monitorInfo)) {
-                std::cerr << "Failed to get monitor info" << std::endl;
+            targetMonitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+            if (!targetMonitor) {
+                std::cerr << "Failed to get primary monitor handle, error: " << GetLastError() << std::endl;
                 return false;
             }
+            
+            if (!GetMonitorInfo(targetMonitor, &monitorInfo)) {
+                std::cerr << "Failed to get primary monitor info, error: " << GetLastError() << std::endl;
+                return false;
+            }
+            
+            std::cout << "Using primary monitor" << std::endl;
         } else {
-            // Try to find the requested monitor
+            // Enumerate all monitors to find the requested one
+            // Define a struct to carry information through the EnumDisplayMonitors callback
             struct EnumMonitorsContext {
                 int targetIndex;
                 int currentIndex;
@@ -202,8 +246,14 @@ bool ScreenCapture::FallbackToGDI() {
             );
             
             if (!context.found) {
-                std::cerr << "Failed to find monitor with index " << m_monitorIndex << std::endl;
-                return false;
+                std::cerr << "Failed to find monitor with index " << m_monitorIndex << ", defaulting to primary" << std::endl;
+                targetMonitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+                if (!GetMonitorInfo(targetMonitor, &monitorInfo)) {
+                    std::cerr << "Failed to get fallback monitor info, error: " << GetLastError() << std::endl;
+                    return false;
+                }
+            } else {
+                std::cout << "Found monitor with index " << m_monitorIndex << std::endl;
             }
         }
         
@@ -212,30 +262,52 @@ bool ScreenCapture::FallbackToGDI() {
         m_monitorWidth = m_monitorRect.right - m_monitorRect.left;
         m_monitorHeight = m_monitorRect.bottom - m_monitorRect.top;
         
-        // Create device contexts
-        m_hdcScreen = CreateDC(TEXT("DISPLAY"), nullptr, nullptr, nullptr);
+        std::cout << "Monitor dimensions: " << m_monitorWidth << "x" << m_monitorHeight << std::endl;
+        std::cout << "Monitor position: Left=" << m_monitorRect.left << ", Top=" << m_monitorRect.top 
+                  << ", Right=" << m_monitorRect.right << ", Bottom=" << m_monitorRect.bottom << std::endl;
+        
+        // Create device contexts - using GetDC(NULL) for the entire virtual screen
+        // which is more reliable than CreateDC("DISPLAY"...)
+        m_hdcScreen = GetDC(NULL);
         if (!m_hdcScreen) {
-            std::cerr << "Failed to create screen DC" << std::endl;
+            std::cerr << "Failed to create screen DC, error: " << GetLastError() << std::endl;
             return false;
         }
         
         m_hdcMemory = CreateCompatibleDC(m_hdcScreen);
         if (!m_hdcMemory) {
-            std::cerr << "Failed to create memory DC" << std::endl;
+            std::cerr << "Failed to create memory DC, error: " << GetLastError() << std::endl;
+            ReleaseDC(NULL, m_hdcScreen);
+            m_hdcScreen = nullptr;
             return false;
         }
         
         // Create bitmap
         m_hBitmap = CreateCompatibleBitmap(m_hdcScreen, m_monitorWidth, m_monitorHeight);
         if (!m_hBitmap) {
-            std::cerr << "Failed to create compatible bitmap" << std::endl;
+            std::cerr << "Failed to create compatible bitmap, error: " << GetLastError() << std::endl;
+            DeleteDC(m_hdcMemory);
+            ReleaseDC(NULL, m_hdcScreen);
+            m_hdcMemory = nullptr;
+            m_hdcScreen = nullptr;
             return false;
         }
         
         // Select bitmap into memory DC
-        SelectObject(m_hdcMemory, m_hBitmap);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(m_hdcMemory, m_hBitmap);
+        if (!oldBmp) {
+            std::cerr << "Failed to select bitmap into DC, error: " << GetLastError() << std::endl;
+            DeleteObject(m_hBitmap);
+            DeleteDC(m_hdcMemory);
+            ReleaseDC(NULL, m_hdcScreen);
+            m_hBitmap = nullptr;
+            m_hdcMemory = nullptr;
+            m_hdcScreen = nullptr;
+            return false;
+        }
         
-        std::cout << "GDI initialization successful (" << m_monitorWidth << "x" << m_monitorHeight << ")" << std::endl;
+        std::cout << "GDI initialization successful for monitor " << m_monitorIndex 
+                 << " (" << m_monitorWidth << "x" << m_monitorHeight << ")" << std::endl;
         
         return true;
     } catch (const std::exception& e) {
@@ -350,6 +422,19 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     D3D11_TEXTURE2D_DESC desc;
     m_acquiredDesktopImage->GetDesc(&desc);
     
+    // Log the format for debugging purposes
+    const char* formatName = "Unknown";
+    switch (desc.Format) {
+        case DXGI_FORMAT_B8G8R8A8_UNORM: formatName = "DXGI_FORMAT_B8G8R8A8_UNORM (BGRA)"; break;
+        case DXGI_FORMAT_R8G8B8A8_UNORM: formatName = "DXGI_FORMAT_R8G8B8A8_UNORM (RGBA)"; break;
+        default: formatName = "Other format"; break;
+    }
+    static bool formatLogged = false;
+    if (!formatLogged) {
+        std::cout << "DXGI Desktop Duplication format: " << formatName << std::endl;
+        formatLogged = true;
+    }
+    
     // Create staging texture for CPU access if not already created or if size changed
     bool needNewStagingTexture = false;
     if (!m_stagingTextures[m_currentTextureIndex]) {
@@ -371,7 +456,8 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         stagingDesc.Height = desc.Height;
         stagingDesc.MipLevels = 1;
         stagingDesc.ArraySize = 1;
-        stagingDesc.Format = desc.Format;
+        // Always use BGRA format for consistent output regardless of input format
+        stagingDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         stagingDesc.SampleDesc.Count = 1;
         stagingDesc.SampleDesc.Quality = 0;
         stagingDesc.Usage = D3D11_USAGE_STAGING;
@@ -388,7 +474,61 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     }
     
     // Copy the acquired image to the staging texture
-    m_d3dContext->CopyResource(m_stagingTextures[m_currentTextureIndex], m_acquiredDesktopImage);
+    if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM) {
+        // Direct copy if formats match
+        m_d3dContext->CopyResource(m_stagingTextures[m_currentTextureIndex], m_acquiredDesktopImage);
+    } else {
+        // Format conversion needed (e.g., RGBA to BGRA)
+        static ID3D11Texture2D* converterTexture = nullptr;
+        static DXGI_FORMAT lastFormat = DXGI_FORMAT_UNKNOWN;
+        static int lastWidth = 0, lastHeight = 0;
+        
+        // Create or recreate converter texture if needed
+        if (!converterTexture || lastFormat != desc.Format || 
+            lastWidth != desc.Width || lastHeight != desc.Height) {
+            
+            // Release any existing converter texture
+            if (converterTexture) {
+                converterTexture->Release();
+                converterTexture = nullptr;
+            }
+            
+            // Create a new texture with BGRA format but renderable
+            D3D11_TEXTURE2D_DESC texDesc = {};
+            texDesc.Width = desc.Width;
+            texDesc.Height = desc.Height;
+            texDesc.MipLevels = 1;
+            texDesc.ArraySize = 1;
+            texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            texDesc.SampleDesc.Count = 1;
+            texDesc.SampleDesc.Quality = 0;
+            texDesc.Usage = D3D11_USAGE_DEFAULT;
+            texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            texDesc.CPUAccessFlags = 0;
+            texDesc.MiscFlags = 0;
+            
+            hr = m_d3dDevice->CreateTexture2D(&texDesc, nullptr, &converterTexture);
+            if (FAILED(hr)) {
+                std::cerr << "Failed to create converter texture: " << std::hex << hr << std::endl;
+                // Fall back to direct copy and hope for the best
+                m_d3dContext->CopyResource(m_stagingTextures[m_currentTextureIndex], m_acquiredDesktopImage);
+            } else {
+                // Store state for next time
+                lastFormat = desc.Format;
+                lastWidth = desc.Width;
+                lastHeight = desc.Height;
+                
+                std::cout << "Created format converter texture from " << formatName 
+                          << " to DXGI_FORMAT_B8G8R8A8_UNORM" << std::endl;
+            }
+        }
+        
+        if (converterTexture) {
+            // Perform GPU color conversion
+            m_d3dContext->CopyResource(converterTexture, m_acquiredDesktopImage);
+            m_d3dContext->CopyResource(m_stagingTextures[m_currentTextureIndex], converterTexture);
+        }
+    }
     
     // Map the staging texture to get access to the data
     D3D11_MAPPED_SUBRESOURCE mappedResource;
@@ -406,6 +546,13 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
     
     // Resize output buffer if needed and ensure it's aligned
     size_t requiredSize = width * height * 4; // BGRA format (4 bytes per pixel)
+    
+    // Make sure output buffer has appropriate size before aligning
+    if (outputBuffer.size() < requiredSize) {
+        std::cout << "Resizing output buffer from " << outputBuffer.size() << " to " << requiredSize << " bytes" << std::endl;
+        outputBuffer.resize(requiredSize);
+    }
+    
     uint8_t* alignedDst = AlignBuffer(outputBuffer, requiredSize);
     
     // Copy the data using optimized method
@@ -465,6 +612,9 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
         }
     }
     
+    // Update buffer pool management
+    ManageBufferPool(outputBuffer, width, height);
+    
     // Release the frame
     hr = m_dxgiOutputDuplication->ReleaseFrame();
     if (FAILED(hr)) {
@@ -487,15 +637,51 @@ bool ScreenCapture::CaptureDXGI(std::vector<uint8_t>& outputBuffer, int& width, 
 
 bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, int& height) {
     if (!m_hdcScreen || !m_hdcMemory || !m_hBitmap) {
-        return false;
+        std::cerr << "Invalid GDI handles for capture" << std::endl;
+        // Try to reinitialize the GDI handles
+        CleanupGDI();
+        if (!FallbackToGDI()) {
+            return false;
+        }
     }
     
     try {
         // Copy screen to bitmap
         if (!BitBlt(m_hdcMemory, 0, 0, m_monitorWidth, m_monitorHeight, 
                    m_hdcScreen, m_monitorRect.left, m_monitorRect.top, SRCCOPY)) {
-            std::cerr << "BitBlt failed with error: " << GetLastError() << std::endl;
-            return false;
+            DWORD error = GetLastError();
+            std::cerr << "BitBlt failed with error: " << error << std::endl;
+            
+            // Provide more detailed information about the error
+            switch (error) {
+                case ERROR_INVALID_HANDLE:
+                    std::cerr << "Invalid handle - Attempting to reinitialize DC handles" << std::endl;
+                    CleanupGDI();
+                    if (!FallbackToGDI()) {
+                        return false;
+                    }
+                    // Try again with new handles
+                    return CaptureGDI(outputBuffer, width, height);
+                case ERROR_INVALID_PARAMETER:
+                    std::cerr << "Invalid parameter - Check monitor dimensions and positions" << std::endl;
+                    // Log the current dimensions for debugging
+                    std::cerr << "Monitor rect: left=" << m_monitorRect.left << ", top=" << m_monitorRect.top 
+                              << ", right=" << m_monitorRect.right << ", bottom=" << m_monitorRect.bottom << std::endl;
+                    std::cerr << "Monitor dimensions: " << m_monitorWidth << "x" << m_monitorHeight << std::endl;
+                    break;
+                case ERROR_ACCESS_DENIED:
+                    std::cerr << "Access denied - The application may not have permission to capture the screen" << std::endl;
+                    break;
+                default:
+                    std::cerr << "Unknown BitBlt error code: " << error << std::endl;
+            }
+            
+            // If we're here, try to reinitialize as a last resort
+            CleanupGDI();
+            if (!FallbackToGDI()) {
+                return false;
+            }
+            return CaptureGDI(outputBuffer, width, height);
         }
         
         // Get bitmap info
@@ -520,11 +706,19 @@ bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, i
         height = bmpInfo.bmHeight;
         const size_t bytesPerPixel = 4; // BGRA format
         const size_t bufferSize = width * height * bytesPerPixel;
+        
+        // Debug output for buffer resizing
+        if (outputBuffer.size() != bufferSize) {
+            std::cout << "CaptureGDI: Resizing buffer from " << outputBuffer.size() 
+                      << " to " << bufferSize << " bytes" << std::endl;
+        }
+        
         outputBuffer.resize(bufferSize);
         
         // Get bitmap bits
         if (!GetDIBits(m_hdcMemory, m_hBitmap, 0, height, outputBuffer.data(), (BITMAPINFO*)&bi, DIB_RGB_COLORS)) {
-            std::cerr << "GetDIBits failed with error: " << GetLastError() << std::endl;
+            DWORD error = GetLastError();
+            std::cerr << "GetDIBits failed with error: " << error << std::endl;
             return false;
         }
         
@@ -551,6 +745,9 @@ bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, i
             }
         }
         
+        // Update buffer pool management
+        ManageBufferPool(outputBuffer, width, height);
+        
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Exception during GDI capture: " << e.what() << std::endl;
@@ -559,6 +756,13 @@ bool ScreenCapture::CaptureGDI(std::vector<uint8_t>& outputBuffer, int& width, i
 }
 
 void ScreenCapture::CleanupDXGI() {
+    // Clean up the static converter texture if it exists
+    static ID3D11Texture2D* converterTexture = nullptr;
+    if (converterTexture) {
+        converterTexture->Release();
+        converterTexture = nullptr;
+    }
+    
     if (m_dxgiOutputDuplication) {
         m_dxgiOutputDuplication->Release();
         m_dxgiOutputDuplication = nullptr;
@@ -602,9 +806,12 @@ void ScreenCapture::CleanupGDI() {
     }
     
     if (m_hdcScreen) {
-        DeleteDC(m_hdcScreen);
+        // Use ReleaseDC for device contexts obtained with GetDC
+        ReleaseDC(NULL, m_hdcScreen);
         m_hdcScreen = nullptr;
     }
+    
+    std::cout << "GDI resources cleaned up" << std::endl;
 }
 
 // Add a method to get the current framerate
@@ -878,57 +1085,145 @@ void ScreenCapture::SetBufferingMode(BufferingMode mode) {
     }
 }
 
-// Calculate the required size for a buffer, including extra padding for alignment
+// Calculate the required size for a buffer, with improved growth factor
 size_t ScreenCapture::GetAlignedSize(size_t size) const {
-    return size + m_alignedBufferPadding;
+    // Add padding for alignment plus 50% growth factor for future use
+    return size + m_alignedBufferPadding + (size / 2);
 }
 
-// Get aligned pointer from buffer
-uint8_t* ScreenCapture::AlignBuffer(std::vector<uint8_t>& buffer, size_t requiredSize) {
-    // Resize the buffer to include extra padding for alignment
-    size_t alignedSize = GetAlignedSize(requiredSize);
-    
-    if (buffer.size() < alignedSize) {
-        buffer.resize(alignedSize);
+// Improved AlignBuffer with buffer pooling
+uint8_t* ScreenCapture::AlignBuffer(std::vector<uint8_t>& outputBuffer, size_t requiredSize) {
+    // Safety check for empty buffer
+    if (outputBuffer.empty()) {
+        std::cout << "AlignBuffer: Empty output buffer, resizing to " << requiredSize << " bytes" << std::endl;
+        outputBuffer.resize(requiredSize);
     }
     
-    // Calculate the aligned pointer
-    uintptr_t address = reinterpret_cast<uintptr_t>(buffer.data());
-    uintptr_t alignedAddress = (address + MEMORY_ALIGNMENT - 1) & ~(MEMORY_ALIGNMENT - 1);
+    // Calculate needed aligned size
+    size_t alignedSize = requiredSize + m_alignedBufferPadding;
     
-    // Make sure we have enough space in the buffer
-    if (alignedAddress + requiredSize > address + buffer.size()) {
-        // If we don't have enough space, resize the buffer again
+    // Check if we can use an existing buffer from the pool
+    if (outputBuffer.size() < alignedSize) {
+        bool foundSuitableBuffer = false;
+        
+        // Try to find a suitable buffer in the pool
+        for (auto it = m_bufferPool.begin(); it != m_bufferPool.end(); ++it) {
+            if (it->size() >= alignedSize) {
+                // Found suitable buffer, swap with output buffer
+                std::cout << "AlignBuffer: Found suitable buffer in pool, size: " << it->size() << " bytes" << std::endl;
+                std::swap(outputBuffer, *it);
+                m_bufferPool.erase(it);
+                foundSuitableBuffer = true;
+                break;
+            }
+        }
+        
+        // If no suitable buffer found, resize with growth factor
+        if (!foundSuitableBuffer) {
+            // Use a 1.5x growth factor to reduce reallocations
+            size_t newSize = std::max(alignedSize, outputBuffer.size() + (outputBuffer.size() / 2));
+            std::cout << "AlignBuffer: Resizing buffer from " << outputBuffer.size() 
+                      << " to " << newSize << " bytes" << std::endl;
+            outputBuffer.resize(newSize);
+        }
+    }
+    
+    // Calculate aligned pointer in a single pass
+    uint8_t* bufferData = outputBuffer.data();
+    uintptr_t address = reinterpret_cast<uintptr_t>(bufferData);
+    uintptr_t alignedAddress = (address + MEMORY_ALIGNMENT - 1) & ~(static_cast<uintptr_t>(MEMORY_ALIGNMENT - 1));
+    
+    // Ensure we have enough space after alignment
+    if (alignedAddress + requiredSize > address + outputBuffer.size()) {
+        // Add exact padding needed and grow with factor
         size_t extraPadding = alignedAddress - address;
-        buffer.resize(requiredSize + extraPadding);
-        alignedAddress = (reinterpret_cast<uintptr_t>(buffer.data()) + MEMORY_ALIGNMENT - 1) & ~(MEMORY_ALIGNMENT - 1);
+        size_t totalNeeded = requiredSize + extraPadding;
+        size_t growthSize = totalNeeded + (totalNeeded / 2); // Add 50% extra
+        
+        std::cout << "AlignBuffer: Need more space after alignment, resizing to " 
+                  << growthSize << " bytes" << std::endl;
+        outputBuffer.resize(growthSize);
+        
+        // Recalculate alignment after resize
+        bufferData = outputBuffer.data();
+        address = reinterpret_cast<uintptr_t>(bufferData);
+        alignedAddress = (address + MEMORY_ALIGNMENT - 1) & ~(static_cast<uintptr_t>(MEMORY_ALIGNMENT - 1));
     }
     
     return reinterpret_cast<uint8_t*>(alignedAddress);
 }
 
-// Add the OptimizedCopyFrame method implementation
-void ScreenCapture::OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, 
-                                     int width, int height, LONG srcStride) {
-    // Use Windows Media Foundation optimized copy function
-    // Each pixel is 4 bytes (BGRA format)
-    const LONG bytesPerPixel = 4;
-    const LONG dstStride = width * bytesPerPixel;
+void ScreenCapture::ManageBufferPool(std::vector<uint8_t>& usedBuffer, int width, int height) {
+    const size_t MAX_POOL_SIZE = 3; // Max number of buffers to keep
+    const double UNUSED_TIMEOUT_SECONDS = 5.0; // Seconds to keep unused buffers
     
-    // MFCopyImage is highly optimized and uses SIMD instructions when available
-    HRESULT hr = MFCopyImage(
-        dst,                // Destination buffer
-        dstStride,          // Destination stride (no padding)
-        src,                // Source buffer
-        srcStride,          // Source stride (might have padding)
-        width * bytesPerPixel, // Width in bytes
-        height              // Number of rows
-    );
+    // Track current frame dimensions
+    if (width != m_lastWidth || height != m_lastHeight) {
+        // Dimensions changed, update tracking
+        m_lastWidth = width;
+        m_lastHeight = height;
+        
+        // Reset unused time counter
+        m_unusedTime = 0;
+    }
     
-    if (FAILED(hr)) {
-        // Fallback to standard method if MFCopyImage fails
-        for (int y = 0; y < height; y++) {
-            memcpy(dst + y * dstStride, src + y * srcStride, width * bytesPerPixel);
+    // Add a copy of the used buffer to the pool - DO NOT clear the original
+    if (!usedBuffer.empty()) {
+        // Only keep a fixed number of buffers in the pool
+        if (m_bufferPool.size() < MAX_POOL_SIZE) {
+            // Add a copy of the buffer to the pool instead of swapping
+            m_bufferPool.push_back(std::vector<uint8_t>(usedBuffer));
+        } else {
+            // Find smallest buffer to replace
+            auto smallestIt = std::min_element(m_bufferPool.begin(), m_bufferPool.end(),
+                [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+                    return a.size() < b.size();
+                });
+            
+            if (smallestIt != m_bufferPool.end() && smallestIt->size() < usedBuffer.size()) {
+                // Replace smaller buffer with a copy of the current one
+                *smallestIt = usedBuffer;
+            }
         }
     }
+    
+    // Update unused time tracking and clean up old buffers
+    LARGE_INTEGER currentTime, frequency;
+    QueryPerformanceCounter(&currentTime);
+    QueryPerformanceFrequency(&frequency);
+    
+    if (m_lastUnusedCheck.QuadPart == 0) {
+        m_lastUnusedCheck = currentTime;
+    } else {
+        double elapsed = static_cast<double>(currentTime.QuadPart - m_lastUnusedCheck.QuadPart) / 
+                         static_cast<double>(frequency.QuadPart);
+        
+        m_unusedTime += elapsed;
+        m_lastUnusedCheck = currentTime;
+        
+        // Clean up unused buffers after timeout
+        if (m_unusedTime > UNUSED_TIMEOUT_SECONDS && !m_bufferPool.empty()) {
+            // Keep only the largest buffer and remove the rest
+            auto largestIt = std::max_element(m_bufferPool.begin(), m_bufferPool.end(),
+                [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+                    return a.size() < b.size();
+                });
+            
+            std::vector<uint8_t> largestBuffer;
+            std::swap(largestBuffer, *largestIt);
+            
+            m_bufferPool.clear();
+            m_bufferPool.push_back(std::move(largestBuffer));
+            
+            // Reset unused time
+            m_unusedTime = 0;
+        }
+    }
+}
+
+// Replace OptimizedCopyFrame method with xsimd version
+void ScreenCapture::OptimizedCopyFrame(uint8_t* dst, const uint8_t* src, 
+                                     int width, int height, LONG srcStride) {
+    // Use our SIMD optimized copy function
+    SimdMemUtils::CopyRowWithStride(dst, src, width, height, srcStride);
 } 

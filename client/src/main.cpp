@@ -1,8 +1,10 @@
 #include "screen_capture.h"
 #include "encoder.h"
 #include "webrtc_session.h"
-#include "preview_window.h"
 #include "performance_logger.h"
+#ifndef NO_PREVIEW_WINDOW
+#include "preview_window.h"
+#endif
 
 #include <iostream>
 #include <string>
@@ -32,6 +34,8 @@ int main(int argc, char* argv[]) {
     float previewScale = 1.0f;  // Changed from 0.75f to 1.0f for pixel-perfect display
     std::string logFile = "performance_double_buffered.csv";
     bool enableLogging = false;
+    int benchmarkFrames = 0; // Number of frames to capture for benchmarking (0 = unlimited)
+    std::string testName = ""; // Test name for including in output filenames
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -43,6 +47,9 @@ int main(int argc, char* argv[]) {
             fps = std::stoi(argv[++i]);
         } else if (arg == "--bitrate" && i + 1 < argc) {
             bitrate = std::stoi(argv[++i]);
+        } else if (arg == "--preview-window" && i + 1 < argc) {
+            std::string value = argv[++i];
+            showPreview = (value == "true");
         } else if (arg == "--no-preview") {
             showPreview = false;
         } else if (arg == "--preview-scale" && i + 1 < argc) {
@@ -52,6 +59,14 @@ int main(int argc, char* argv[]) {
             enableLogging = true;
         } else if (arg == "--enable-logging") {
             enableLogging = true;
+        } else if (arg == "--benchmark" && i + 1 < argc) {
+            benchmarkFrames = std::stoi(argv[++i]);
+        } else if (arg == "--output-csv" && i + 1 < argc) {
+            logFile = argv[++i];
+            enableLogging = true;
+        } else if (arg == "--test-name" && i + 1 < argc) {
+            testName = argv[++i];
+            std::cout << "Using test name: " << testName << std::endl;
         } else if (arg == "--help") {
             std::cout << "Desktop Sharing Client" << std::endl;
             std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -60,10 +75,14 @@ int main(int argc, char* argv[]) {
             std::cout << "  --monitor <index>         Monitor index to capture (default: 0)" << std::endl;
             std::cout << "  --fps <fps>               Target FPS (default: 30)" << std::endl;
             std::cout << "  --bitrate <bitrate>       Target bitrate in bps (default: 2000000)" << std::endl;
+            std::cout << "  --preview-window <bool>   Enable or disable preview window" << std::endl;
             std::cout << "  --no-preview              Disable preview window" << std::endl;
             std::cout << "  --preview-scale <scale>   Scale preview window (default: 1.0)" << std::endl;
             std::cout << "  --enable-logging          Enable performance logging" << std::endl;
             std::cout << "  --log-file <filename>     Log file name (default: performance_double_buffered.csv)" << std::endl;
+            std::cout << "  --benchmark <frames>      Run in benchmark mode for specified number of frames" << std::endl;
+            std::cout << "  --output-csv <filename>   Output CSV file for benchmark results" << std::endl;
+            std::cout << "  --test-name <name>        Test name to include in output H.264 files" << std::endl;
             std::cout << "  --help                    Show this help message" << std::endl;
             return 0;
         }
@@ -106,12 +125,13 @@ int main(int argc, char* argv[]) {
     
     // Initialize encoder (which now handles frame rate control in a separate thread)
     Encoder encoder;
-    if (!encoder.Initialize(width, height, fps, bitrate)) {
+    if (!encoder.Initialize(width, height, fps, bitrate, testName)) {
         std::cerr << "Failed to initialize encoder" << std::endl;
         return 1;
     }
     
     // Initialize preview window if enabled
+#ifndef NO_PREVIEW_WINDOW
     std::unique_ptr<PreviewWindow> previewWindow;
     if (showPreview) {
         previewWindow = std::make_unique<PreviewWindow>();
@@ -125,6 +145,7 @@ int main(int argc, char* argv[]) {
             previewWindow.reset();
         }
     }
+#endif
     
     // Tracking statistics for display
     LARGE_INTEGER frequency, statsLastTime;
@@ -146,29 +167,44 @@ int main(int argc, char* argv[]) {
     std::cout << "Starting capture loop..." << std::endl;
     
     // Main capture loop is now simpler - no need to manage timing for encoding
-    while (g_running) {
+    while (g_running && (benchmarkFrames == 0 || totalFrameCount < benchmarkFrames)) {
         // Capture frame
         if (screenCapture.CaptureFrame(frameBuffer, width, height)) {
-            // Update preview window if enabled
-            if (previewWindow) {
-                if (!previewWindow->UpdateFrame(frameBuffer, width, height)) {
-                    std::cerr << "Failed to update preview frame" << std::endl;
+            // Debug output to check frameBuffer size
+            std::cout << "Frame captured - Buffer size: " << frameBuffer.size() 
+                      << " bytes, Dimensions: " << width << "x" << height 
+                      << ", Expected size: " << (width * height * 4) << " bytes" << std::endl;
+            
+            // Ensure the frame buffer has valid data before proceeding
+            if (frameBuffer.size() >= width * height * 4) {
+                // Update preview window if enabled
+#ifndef NO_PREVIEW_WINDOW
+                if (previewWindow) {
+                    if (!previewWindow->UpdateFrame(frameBuffer, width, height)) {
+                        std::cerr << "Failed to update preview frame" << std::endl;
+                    }
+                    
+                    // Process window messages
+                    if (!previewWindow->ProcessMessages()) {
+                        std::cout << "Preview window closed, shutting down..." << std::endl;
+                        g_running = false;
+                        break;
+                    }
                 }
+#endif
                 
-                // Process window messages
-                if (!previewWindow->ProcessMessages()) {
-                    std::cout << "Preview window closed, shutting down..." << std::endl;
-                    g_running = false;
-                    break;
-                }
+                // Make a deep copy of the frame buffer to ensure it stays valid for the encoder
+                std::vector<uint8_t> encoderFrame(frameBuffer);
+                
+                // Send frame to encoder (which now handles timing in a separate thread)
+                encoder.EncodeFrame(encoderFrame, width, height);
+                
+                // Update statistics
+                frameCount++;
+                totalFrameCount++;
+            } else {
+                std::cerr << "Skipping frame with invalid buffer size" << std::endl;
             }
-            
-            // Send frame to encoder (which now handles timing in a separate thread)
-            encoder.EncodeFrame(frameBuffer, width, height);
-            
-            // Update statistics
-            frameCount++;
-            totalFrameCount++;
             
             // Print statistics every second
             LARGE_INTEGER currentTime;
@@ -210,9 +246,11 @@ int main(int argc, char* argv[]) {
     }
     
     // Clean up resources
+#ifndef NO_PREVIEW_WINDOW
     if (previewWindow) {
         previewWindow->Shutdown();
     }
+#endif
     
     return 0;
 } 

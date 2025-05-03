@@ -12,6 +12,10 @@
 #include <queue>
 #include <atomic>
 #include <condition_variable>
+#include <string>
+
+// Forward declarations
+class YuvConverter;
 
 // x264 includes
 extern "C" {
@@ -37,7 +41,10 @@ public:
     Encoder();
     ~Encoder();
 
-    bool Initialize(int width, int height, int fps = 30, int bitrate = 2000000);
+    // Initialize the encoder
+    bool Initialize(int width, int height, int fps = 30, int bitrate = 5000, const std::string& testName = "");
+    
+    // New method for queueing frames for threaded encoding
     bool EncodeFrame(const std::vector<uint8_t>& bgraFrame, int width, int height);
     
     // Set callback for encoded data
@@ -46,23 +53,40 @@ public:
     // Set callback for encoder statistics
     void SetStatsCallback(EncoderStatsCallback callback) { m_statsCallback = callback; }
 
+    // Get current encoding FPS
+    float GetFPS() const;
+
 private:
     // File output methods
     bool OpenOutputFile();
     void CloseOutputFile();
     void OutputHeaders();
     
+    // Statistics processing method
+    void ProcessStats(x264_nal_t* nals, int numNals, x264_picture_t* pic_out);
+    
     // Threaded encoding
     void EncodingThreadFunc();
     void StartEncodingThread();
     void StopEncodingThread();
     
+    // Method for encoding a frame (used by the encoding thread)
+    bool EncodeFrameInternal(const EncoderFrame& frame);
+    
+    // Direct frame encoding method (non-threaded)
+    bool EncodeFrameDirect(const std::vector<uint8_t>& bgraFrame,
+                           std::vector<uint8_t>& outputData,
+                           bool& isKeyFrame);
+    
+    // Helper methods
+    bool ConvertBGRAtoYUV(const std::vector<uint8_t>& bgraFrame);
+    
     // Basic encoder state
     int m_width = 0;
     int m_height = 0;
     int m_frameCount = 0;
-    int m_fps = 30;
-    int m_bitrate = 2000000;
+    int m_bitrate = 5000;
+    int m_fps = 30;              // Target frames per second
     
     // Windows-specific frame timing using QPC
     LARGE_INTEGER m_frequency;       // Performance counter frequency
@@ -83,6 +107,7 @@ private:
     
     // Output file
     std::ofstream m_outputFile;
+    std::string m_testName;          // Test name for file naming
     
     // x264 specific members
     x264_t* m_encoder = nullptr;
@@ -92,12 +117,18 @@ private:
     // YUV buffer for color conversion
     std::vector<uint8_t> m_yuvBuffer;
     
-    // Helper methods
-    bool ConvertBGRAtoYUV(const std::vector<uint8_t>& bgraFrame);
-    bool EncodeFrameInternal(const EncoderFrame& frame);
-    
     // Performance statistics
     float m_actualFps = 0.0f;
     LARGE_INTEGER m_lastStatsTime;
     int m_statsFrameCount = 0;
+    int m_statsInterval = 30;        // Calculate stats every N frames
+
+    // Encoder parameters
+    int64_t m_firstPts = 0;          // First frame PTS
+    int64_t m_lastPts = 0;           // Last frame PTS
+    int64_t m_encodedBytes = 0;      // Total encoded bytes
+    int64_t m_statsStartTime = 0;    // Start time for statistics
+
+    // YUV conversion buffer management
+    std::unique_ptr<YuvConverter> m_yuvConverter;
 }; 
