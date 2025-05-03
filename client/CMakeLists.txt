@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Build options
+option(WITH_PREVIEW "Build with preview window support" ON)
+option(WITH_TRIPLE_BUFFERING "Use triple buffering for texture staging" OFF)
+option(WITH_MEMORY_ALIGNMENT "Use memory alignment optimization" OFF)
+option(WITH_MEDIA_FOUNDATION "Use Media Foundation for memory operations" OFF)
+option(WITH_SIMD "Use SIMD optimizations" OFF)
+option(WITH_XSIMD "Use xsimd library for SIMD operations" OFF)
+
 # Build static libraries
 set(BUILD_SHARED_LIBS OFF)
 
@@ -20,11 +28,17 @@ set(THIRD_PARTY_LIB_DIR ${THIRD_PARTY_DIR}/lib)
 set(X264_INCLUDE_DIR ${THIRD_PARTY_DIR}/x264/build/include)
 set(X264_LIBRARY_PATH ${THIRD_PARTY_DIR}/x264/build/lib/libx264.a)
 
+# libyuv library settings
+set(LIBYUV_DIR ${THIRD_PARTY_DIR}/libyuv)
+set(LIBYUV_INCLUDE_DIR ${LIBYUV_DIR}/include)
+set(LIBYUV_LIBRARY_PATH ${LIBYUV_DIR}/lib/libyuv.a)
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${THIRD_PARTY_INCLUDE_DIR}
     ${X264_INCLUDE_DIR}
+    ${LIBYUV_INCLUDE_DIR}
     # Windows SDK DirectXMath include directory - needed for MinGW
     "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um"
     "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/shared"
@@ -35,10 +49,38 @@ set(SOURCES
     src/main.cpp
     src/screen_capture.cpp
     src/encoder.cpp
+    src/yuv_converter.cpp
     src/webrtc_session.cpp
-    src/preview_window.cpp
     src/performance_logger.cpp
 )
+
+# Add preview window if enabled
+if(WITH_PREVIEW)
+    list(APPEND SOURCES src/preview_window.cpp)
+else()
+    add_definitions(-DNO_PREVIEW_WINDOW)
+endif()
+
+# Memory-related optimizations
+if(WITH_TRIPLE_BUFFERING)
+    add_definitions(-DUSE_TRIPLE_BUFFERING)
+endif()
+
+if(WITH_MEMORY_ALIGNMENT)
+    add_definitions(-DUSE_MEMORY_ALIGNMENT)
+endif()
+
+if(WITH_MEDIA_FOUNDATION)
+    add_definitions(-DUSE_MEDIA_FOUNDATION)
+endif()
+
+if(WITH_SIMD)
+    add_definitions(-DUSE_SIMD)
+endif()
+
+if(WITH_XSIMD)
+    add_definitions(-DUSE_XSIMD)
+endif()
 
 # Define the executable
 add_executable(desktop_sharing_client ${SOURCES})
@@ -50,9 +92,18 @@ target_link_libraries(desktop_sharing_client PRIVATE
     d3d11
     d3dcompiler
     psapi
-    mfplat  # Media Foundation for optimized memory operations
     ${X264_LIBRARY_PATH}
+    ${LIBYUV_LIBRARY_PATH}  # Reinstated libyuv
 )
+
+# Add Media Foundation library if enabled
+if(WITH_MEDIA_FOUNDATION)
+    target_link_libraries(desktop_sharing_client PRIVATE
+        mfplat
+        mf
+        mfuuid
+    )
+endif()
 
 # Compiler flags
 if(MINGW)
@@ -61,6 +112,8 @@ if(MINGW)
         -Wextra
         -static-libgcc
         -static-libstdc++
+        -msse2     # Enable SSE2 support
+        -mavx      # Enable AVX support
     )
     
     # Static linking for MinGW

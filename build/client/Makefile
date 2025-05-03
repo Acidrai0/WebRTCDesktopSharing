@@ -201,30 +201,6 @@ src/performance_logger.cpp.s:
 	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/performance_logger.cpp.s
 .PHONY : src/performance_logger.cpp.s
 
-src/preview_window.obj: src/preview_window.cpp.obj
-.PHONY : src/preview_window.obj
-
-# target to build an object file
-src/preview_window.cpp.obj:
-	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.obj
-.PHONY : src/preview_window.cpp.obj
-
-src/preview_window.i: src/preview_window.cpp.i
-.PHONY : src/preview_window.i
-
-# target to preprocess a source file
-src/preview_window.cpp.i:
-	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.i
-.PHONY : src/preview_window.cpp.i
-
-src/preview_window.s: src/preview_window.cpp.s
-.PHONY : src/preview_window.s
-
-# target to generate assembly for a file
-src/preview_window.cpp.s:
-	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/preview_window.cpp.s
-.PHONY : src/preview_window.cpp.s
-
 src/screen_capture.obj: src/screen_capture.cpp.obj
 .PHONY : src/screen_capture.obj
 
@@ -273,6 +249,30 @@ src/webrtc_session.cpp.s:
 	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/webrtc_session.cpp.s
 .PHONY : src/webrtc_session.cpp.s
 
+src/yuv_converter.obj: src/yuv_converter.cpp.obj
+.PHONY : src/yuv_converter.obj
+
+# target to build an object file
+src/yuv_converter.cpp.obj:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/yuv_converter.cpp.obj
+.PHONY : src/yuv_converter.cpp.obj
+
+src/yuv_converter.i: src/yuv_converter.cpp.i
+.PHONY : src/yuv_converter.i
+
+# target to preprocess a source file
+src/yuv_converter.cpp.i:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/yuv_converter.cpp.i
+.PHONY : src/yuv_converter.cpp.i
+
+src/yuv_converter.s: src/yuv_converter.cpp.s
+.PHONY : src/yuv_converter.s
+
+# target to generate assembly for a file
+src/yuv_converter.cpp.s:
+	cd /d C:\Users\arbazAhmed\Documents\WebRTCDesktopSharing\build && $(MAKE) $(MAKESILENT) -f client\CMakeFiles\desktop_sharing_client.dir\build.make client/CMakeFiles/desktop_sharing_client.dir/src/yuv_converter.cpp.s
+.PHONY : src/yuv_converter.cpp.s
+
 # Help Target
 help:
 	@echo The following are some of the valid targets for this Makefile:
@@ -291,15 +291,15 @@ help:
 	@echo ... src/performance_logger.obj
 	@echo ... src/performance_logger.i
 	@echo ... src/performance_logger.s
-	@echo ... src/preview_window.obj
-	@echo ... src/preview_window.i
-	@echo ... src/preview_window.s
 	@echo ... src/screen_capture.obj
 	@echo ... src/screen_capture.i
 	@echo ... src/screen_capture.s
 	@echo ... src/webrtc_session.obj
 	@echo ... src/webrtc_session.i
 	@echo ... src/webrtc_session.s
+	@echo ... src/yuv_converter.obj
+	@echo ... src/yuv_converter.i
+	@echo ... src/yuv_converter.s
 .PHONY : help
 
 

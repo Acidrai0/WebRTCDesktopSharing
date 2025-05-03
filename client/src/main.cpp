@@ -36,6 +36,8 @@ int main(int argc, char* argv[]) {
     bool enableLogging = false;
     int benchmarkFrames = 0; // Number of frames to capture for benchmarking (0 = unlimited)
     std::string testName = ""; // Test name for including in output filenames
+    std::string pipelineMode = "sequential"; // Default to sequential pipeline
+    bool useZeroCopy = true; // Default to zero-copy mode for better performance
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -47,6 +49,11 @@ int main(int argc, char* argv[]) {
             fps = std::stoi(argv[++i]);
         } else if (arg == "--bitrate" && i + 1 < argc) {
             bitrate = std::stoi(argv[++i]);
+        } else if (arg == "--pipeline-mode" && i + 1 < argc) {
+            pipelineMode = argv[++i];
+        } else if (arg == "--zero-copy" && i + 1 < argc) {
+            std::string value = argv[++i];
+            useZeroCopy = (value == "true" || value == "1");
         } else if (arg == "--preview-window" && i + 1 < argc) {
             std::string value = argv[++i];
             showPreview = (value == "true");
@@ -75,6 +82,8 @@ int main(int argc, char* argv[]) {
             std::cout << "  --monitor <index>         Monitor index to capture (default: 0)" << std::endl;
             std::cout << "  --fps <fps>               Target FPS (default: 30)" << std::endl;
             std::cout << "  --bitrate <bitrate>       Target bitrate in bps (default: 2000000)" << std::endl;
+            std::cout << "  --pipeline-mode <mode>   Encoding pipeline mode: sequential or parallel (default: sequential)" << std::endl;
+            std::cout << "  --zero-copy <bool>        Enable or disable zero-copy mode (default: true)" << std::endl;
             std::cout << "  --preview-window <bool>   Enable or disable preview window" << std::endl;
             std::cout << "  --no-preview              Disable preview window" << std::endl;
             std::cout << "  --preview-scale <scale>   Scale preview window (default: 1.0)" << std::endl;
@@ -129,6 +138,18 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to initialize encoder" << std::endl;
         return 1;
     }
+    
+    // Set pipeline mode if specified
+    if (pipelineMode == "parallel") {
+        std::cout << "Using parallel encoding pipeline" << std::endl;
+        encoder.SetPipelineMode(EncoderPipelineMode::Parallel);
+    } else {
+        std::cout << "Using sequential encoding pipeline" << std::endl;
+        encoder.SetPipelineMode(EncoderPipelineMode::Sequential);
+    }
+    
+    // Display zero-copy mode
+    std::cout << "Zero-copy mode: " << (useZeroCopy ? "enabled" : "disabled") << std::endl;
     
     // Initialize preview window if enabled
 #ifndef NO_PREVIEW_WINDOW
@@ -193,11 +214,20 @@ int main(int argc, char* argv[]) {
                 }
 #endif
                 
-                // Make a deep copy of the frame buffer to ensure it stays valid for the encoder
-                std::vector<uint8_t> encoderFrame(frameBuffer);
-                
-                // Send frame to encoder (which now handles timing in a separate thread)
-                encoder.EncodeFrame(encoderFrame, width, height);
+                // Use zero-copy or regular encoding based on configuration
+                if (useZeroCopy) {
+                    // Create a shared pointer to the frame buffer
+                    auto sharedFrame = std::make_shared<std::vector<uint8_t>>(frameBuffer);
+                    
+                    // Send frame to encoder using zero-copy method
+                    encoder.EncodeFrameZeroCopy(sharedFrame, width, height);
+                } else {
+                    // Make a deep copy of the frame buffer to ensure it stays valid for the encoder
+                    std::vector<uint8_t> encoderFrame(frameBuffer);
+                    
+                    // Send frame to encoder (which now handles timing in a separate thread)
+                    encoder.EncodeFrame(encoderFrame, width, height);
+                }
                 
                 // Update statistics
                 frameCount++;
